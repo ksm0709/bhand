@@ -1,0 +1,9 @@
+<launch>
+	<include file="$(find bhand)/launch/load.launch"/>
+
+	<node pkg="ros_myo" type="myonode.py" name="myo_raw" args="/dev/ttyACM0"/>
+	<node pkg="bhand" type="emgProcess" name="emgProcess" output="screen" args="-r"/>
+
+	<node pkg="robolimb" type="robolimb" name="robolimb" output="screen"/>
+	<node pkg="bhand" type="robolimbControl" name="robolimbControl" output="screen"/>
+</launch>

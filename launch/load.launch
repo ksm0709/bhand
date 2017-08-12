@@ -1,0 +1,6 @@
+<launch>
+	<arg name="CONFIG_DIR" value="$(find bhand)/config" />
+
+	<rosparam command="load" file="$(arg CONFIG_DIR)/emgConfig.yaml" />
+	<rosparam command="load" file="$(arg CONFIG_DIR)/gloveConfig.yaml" />
+</launch>

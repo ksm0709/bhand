@@ -1,0 +1,5 @@
+<launch>
+	<node pkg="bhand" type="emgProcess" name="emgProcess" output="screen" args="-r"/>
+	<node pkg="bhand" type="gloveProcess" name="gloveProcess" output="screen" args="-r"/>
+	<node pkg="bhand" type="resWatch" name="resWatch" output="screen"/>
+</launch>

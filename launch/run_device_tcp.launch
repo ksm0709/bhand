@@ -1,0 +1,13 @@
+<launch>
+	<include file="$(find bhand)/launch/load.launch"/>
+
+	<node pkg="comm_tcp" type="emg_server_node" name="emg_node" output="screen">
+		<param name="port_number" value="9999"/>		
+	</node>
+
+	<node pkg="comm_tcp" type="glove_server_node" name="glove_node" output="screen">
+		<param name="port_number" value="9998"/>
+	</node>
+
+	<node pkg="bhand" type="resWatch" name="resWatch" output="screen"/>
+</launch>

@@ -1,0 +1,65 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+FIR_FILTER	include/dsp.h	/^} FIR_FILTER;$/;"	t	typeref:struct:__anon1
+MODE_MAX	src/emgProcess.cpp	11;"	d	file:
+MODE_MAX	src/gloveProcess.cpp	11;"	d	file:
+MODE_MIN	src/emgProcess.cpp	10;"	d	file:
+MODE_MIN	src/gloveProcess.cpp	10;"	d	file:
+MODE_RUN	src/emgProcess.cpp	9;"	d	file:
+MODE_RUN	src/gloveProcess.cpp	9;"	d	file:
+MuscleBase	include/MuscleBase.h	/^class MuscleBase$/;"	c
+ORDER	include/dsp.h	3;"	d
+T_act	include/MuscleBase.h	19;"	d
+T_deact	include/MuscleBase.h	20;"	d
+WINDOW_SIZE	include/dsp.h	4;"	d
+act	src/emgProcess.cpp	/^double act[16];$/;"	v
+callback	src/emgProcess.cpp	/^void callback(const std_msgs::Int16MultiArray::ConstPtr& arr)$/;"	f
+callback	src/gloveProcess.cpp	/^void callback(const std_msgs::Int8MultiArray::ConstPtr& arr)$/;"	f
+callback_emg	src/bhand_test.cpp	/^void callback_emg(const std_msgs::Int8MultiArray::ConstPtr& arr)$/;"	f
+callback_rcp	src/bhand_test.cpp	/^void callback_rcp(const std_msgs::Int8::ConstPtr& ptr)$/;"	f
+coeff	include/dsp.h	/^	double coeff[100];$/;"	m	struct:__anon1
+coeff	include/dsp.h	/^double coeff[ORDER] = {$/;"	v
+data	include/dsp.h	/^	int16_t data[100];$/;"	m	struct:__anon1
+data	include/dsp.h	/^	int16_t data[300];$/;"	m	struct:__anon2
+emgData	src/bhand_test.cpp	/^int8_t emgData[16];$/;"	v
+f	include/MuscleBase.h	/^	static double f(double a, double u)$/;"	f	class:MuscleBase
+fir	include/dsp.h	/^FIR_FILTER fir[16];$/;"	v
+firFilter_init	include/dsp.h	/^void firFilter_init()$/;"	f
+firFilter_update	include/dsp.h	/^int16_t firFilter_update( int channel, int16_t data )$/;"	f
+fir_init	include/dsp.h	/^void fir_init( FIR_FILTER* f, double *coeff_ , int order )$/;"	f
+fir_update	include/dsp.h	/^int16_t fir_update( FIR_FILTER* f, int16_t data )$/;"	f
+get_next_activation	include/MuscleBase.h	/^	double get_next_activation(double a, double u, double dt)$/;"	f	class:MuscleBase
+main	src/bhand_test.cpp	/^int main(int argc, char **argv)$/;"	f
+main	src/emgProcess.cpp	/^int main(int argc, char **argv)$/;"	f
+main	src/glove.cpp	/^int main(int argc, char **argv)$/;"	f
+main	src/gloveProcess.cpp	/^int main(int argc, char **argv)$/;"	f
+max	src/emgProcess.cpp	/^int max[16];$/;"	v
+max	src/gloveProcess.cpp	/^int max[5];$/;"	v
+min	src/emgProcess.cpp	/^int min[16];$/;"	v
+min	src/gloveProcess.cpp	/^int min[5];$/;"	v
+muscle	src/emgProcess.cpp	/^MuscleBase muscle;$/;"	v
+order	include/dsp.h	/^	int order;$/;"	m	struct:__anon1
+order	include/dsp.h	/^	int order;$/;"	m	struct:__anon2
+rawData	src/emgProcess.cpp	/^int16_t rawData[16];$/;"	v
+rawData	src/gloveProcess.cpp	/^double rawData[5];$/;"	v
+rcp	src/bhand_test.cpp	/^int8_t rcp;$/;"	v
+readFlag	src/emgProcess.cpp	/^bool readFlag = false;$/;"	v
+readFlag	src/gloveProcess.cpp	/^bool readFlag = false;$/;"	v
+resData	src/emgProcess.cpp	/^int8_t resData[16];$/;"	v
+resData	src/gloveProcess.cpp	/^int8_t resData[5];$/;"	v
+rk4	src/rk4.cpp	/^double rk4(double t0, double u0, double dt, double (*f)(double t, double u))$/;"	f
+rk4vec	src/rk4.cpp	/^double *rk4vec(double t0, int m, double u0[], double dt, double *f(double t, int m, double u[]))$/;"	f
+rms	include/dsp.h	/^rms_filter rms[16];$/;"	v
+rmsFilter_init	include/dsp.h	/^void rmsFilter_init(int window_size)$/;"	f
+rmsFilter_update	include/dsp.h	/^int16_t rmsFilter_update( int channel, int16_t data )$/;"	f
+rms_filter	include/dsp.h	/^} rms_filter;$/;"	t	typeref:struct:__anon2
+rms_init	include/dsp.h	/^void rms_init( rms_filter* f , int order )$/;"	f
+rms_update	include/dsp.h	/^int16_t rms_update( rms_filter* f, int16_t data )$/;"	f
+saveParam	src/emgProcess.cpp	/^void saveParam(void)$/;"	f
+saveParam	src/gloveProcess.cpp	/^void saveParam(void)$/;"	f
+top	include/dsp.h	/^	int top;$/;"	m	struct:__anon1
+top	include/dsp.h	/^	int top;$/;"	m	struct:__anon2

@@ -1,0 +1,38 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.9~svn20110310	//
+MODE_MAX	emgProcess.cpp	11;"	d	file:
+MODE_MAX	gloveProcess.cpp	11;"	d	file:
+MODE_MIN	emgProcess.cpp	10;"	d	file:
+MODE_MIN	gloveProcess.cpp	10;"	d	file:
+MODE_RUN	emgProcess.cpp	9;"	d	file:
+MODE_RUN	gloveProcess.cpp	9;"	d	file:
+act	emgProcess.cpp	/^double act[16];$/;"	v
+callback	emgProcess.cpp	/^void callback(const std_msgs::Int16MultiArray::ConstPtr& arr)$/;"	f
+callback	gloveProcess.cpp	/^void callback(const std_msgs::Int8MultiArray::ConstPtr& arr)$/;"	f
+callback_emg	bhand_test.cpp	/^void callback_emg(const std_msgs::Int8MultiArray::ConstPtr& arr)$/;"	f
+callback_rcp	bhand_test.cpp	/^void callback_rcp(const std_msgs::Int8::ConstPtr& ptr)$/;"	f
+emgData	bhand_test.cpp	/^int8_t emgData[16];$/;"	v
+main	bhand_test.cpp	/^int main(int argc, char **argv)$/;"	f
+main	emgProcess.cpp	/^int main(int argc, char **argv)$/;"	f
+main	glove.cpp	/^int main(int argc, char **argv)$/;"	f
+main	gloveProcess.cpp	/^int main(int argc, char **argv)$/;"	f
+max	emgProcess.cpp	/^int max[16];$/;"	v
+max	gloveProcess.cpp	/^int max[5];$/;"	v
+min	emgProcess.cpp	/^int min[16];$/;"	v
+min	gloveProcess.cpp	/^int min[5];$/;"	v
+muscle	emgProcess.cpp	/^MuscleBase muscle;$/;"	v
+rawData	emgProcess.cpp	/^int16_t rawData[16];$/;"	v
+rawData	gloveProcess.cpp	/^double rawData[5];$/;"	v
+rcp	bhand_test.cpp	/^int8_t rcp;$/;"	v
+readFlag	emgProcess.cpp	/^bool readFlag = false;$/;"	v
+readFlag	gloveProcess.cpp	/^bool readFlag = false;$/;"	v
+resData	emgProcess.cpp	/^int8_t resData[16];$/;"	v
+resData	gloveProcess.cpp	/^int8_t resData[5];$/;"	v
+rk4	rk4.cpp	/^double rk4(double t0, double u0, double dt, double (*f)(double t, double u))$/;"	f
+rk4vec	rk4.cpp	/^double *rk4vec(double t0, int m, double u0[], double dt, double *f(double t, int m, double u[]))$/;"	f
+saveParam	emgProcess.cpp	/^void saveParam(void)$/;"	f
+saveParam	gloveProcess.cpp	/^void saveParam(void)$/;"	f

@@ -1,0 +1,16 @@
+Gain:
+    Elbow: 1.0
+    Forearm: 1.0
+    Wrist: 1.0
+    Hand: 1.0
+Upperbound:
+    Elbow: 3.14
+    Forearm: 3.14
+    Wrist: 3.14
+    Hand: 3.14
+Lowerbound:
+    Elbow: -3.14
+    Forearm: -3.14
+    Wrist: -3.14
+    Hand: -3.14
+
