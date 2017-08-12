@@ -143,11 +143,6 @@ target_link_libraries(emgProcess ${catkin_LIBRARIES} bhand)
 
 add_dependencies(emgProcess ${catkin_EXPORTED_TARGETS})
 
-#gloveProcess
-add_executable(gloveProcess src/gloveProcess.cpp)
-
-target_link_libraries(gloveProcess ${catkin_LIBRARIES})
-
 #test
 add_executable(resWatch src/bhand_test.cpp)
 
@@ -155,23 +150,6 @@ add_dependencies(resWatch resWatch_generate_message_cpp)
 add_dependencies(resWatch ${catkin_EXPORTED_TARGETS})
 
 target_link_libraries(resWatch ${catkin_LIBRARIES})
-
-#robolimbControl
-add_executable(robolimbControl src/robolimb_control.cpp)
-
-target_link_libraries(robolimbControl ${catkin_LIBRARIES})
-
-#moonwalkerControl
-add_executable(moonwalkerControl src/moonwalker_control.cpp src/moonwalker.cpp)
-
-target_link_libraries(moonwalkerControl ${catkin_LIBRARIES} bhand)
-target_link_libraries(moonwalkerControl /usr/lib/libcanlib.so) 
-
-#armControl
-add_executable(armControl src/armControl.cpp src/moonwalker.cpp src/serial.cpp)
-
-target_link_libraries(armControl ${catkin_LIBRARIES})
-target_link_libraries(armControl /usr/lib/libcanlib.so)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
