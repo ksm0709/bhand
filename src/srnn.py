@@ -151,7 +151,7 @@ class RosTF():
                 self.initial_state = tf.placeholder(tf.float32, shape=[None,self.layer_out])
 
                 #DRNNNetwork
-                self.cell = DRNNCell(num_output=self.layer_out, num_units=[8], activation=tf.nn.relu) 
+                self.cell = DRNNCell(num_output=self.layer_out, num_units=[10,10,10], activation=tf.nn.relu) 
                 self.x_next, _states = tf.nn.dynamic_rnn( self.cell, self.u_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
                 self.loss = tf.reduce_sum(tf.square(self.x_ph - self.x_next)) 
@@ -176,9 +176,10 @@ class RosTF():
 
                 # Load Model ################################################# 
                 self.model_dir = "tf_model/model_srnn.ckpt"
-                self.saver_on = False
-                
-                if self.saver_on == True:
+                self.saver_on = args.save
+                self.loader_on = args.load 
+
+                if self.loader_on == True:
                     self.saver.restore(self.sess,self.model_dir)
                ############################################################### 
 
@@ -196,6 +197,10 @@ class RosTF():
                 self.enque_op = self.que.enqueue([self.uEnque_ph, self.xEnque_ph, self.x0Enque_ph])
                 self.deque_op = self.que.dequeue_many(self.batch_size) 
                 self.que_size = self.que.size()
+
+                #ETC
+                self.f4ph = tf.placeholder( tf.float32, shape=[ self.size_x ])
+                self.l2norm = tf.norm( self.f4ph, ord=2 )
                 
                 print "-------------------------------------------------"
 
@@ -291,6 +296,7 @@ class RosTF():
 
         with self.coord.stop_on_exception():
 
+
             step = 0
             x0 = np.array([])
             u = np.array([])
@@ -298,22 +304,23 @@ class RosTF():
                 if self.stateSampled == True:
                     self.stateSampled = False
                    
-                    x0 = np.array( [self.stateData.position, self.stateData.velocity] )
-                    u = np.array( [[self.stateData.effort]*self.seq_length] )
-            
+                    x0 = np.array( [self.stateData.position + self.stateData.velocity] )
+                    u = np.array( [[self.stateData.effort for _ in range(self.seq_length)]] )
+
                     feed_dict = { self.u_ph : u, 
                                   self.initial_state : x0  } 
 
                     result = self.sess.run(self.x_next, feed_dict=feed_dict)
-                    self.x_predict_buf = self.x_predict
-                    self.x_predict = result[0,:]
 
                     step = step + 1
 
-                    if step%10 == 0 :
+                    if step%10 == 0 and step > 0 :
                         
-                        err = x_predict_buf - x0
-                        print "Prediction Error : {0}\n".format(err)
+                        err = self.x_predict - x0[0,:]
+                        l2err = self.sess.run(self.l2norm, feed_dict={ self.f4ph : err })
+                        print "L2(ERR) : {0}   Prediction Error : {1}\n".format(l2err,err)
+
+                    self.x_predict = result[0,0,:]
 
                 time.sleep(0.001)
 
@@ -372,6 +379,20 @@ if __name__ == '__main__':
             type=str,
             default='tf_log',
             help="Logging directory ( default : tf_log )"
+            )
+
+    parser.add_argument(
+            '-load',
+            type=bool,
+            default=False,
+            help="Load model"
+            )
+
+    parser.add_argument(
+            '-save',
+            type=bool,
+            default=True,
+            help="Save model"
             )
     
 
