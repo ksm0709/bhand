@@ -16,7 +16,7 @@
 #include <termios.h>
 #include <vector>
 
-#define ERROR_THRESHOLD		100
+#define ERROR_THRESHOLD		200
 
 class Serial
 {

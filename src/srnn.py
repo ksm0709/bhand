@@ -93,6 +93,11 @@ def training(loss, learning_rate):
 
     return train_op
 
+def Cald_projected_gradient(grad):
+
+    return grad
+
+
 class RosTF():
     def __init__(self):
       
@@ -153,9 +158,15 @@ class RosTF():
                 #DRNNNetwork
                 self.cell = DRNNCell(num_output=self.layer_out, num_units=[10,10,10], activation=tf.nn.relu) 
                 self.x_next, _states = tf.nn.dynamic_rnn( self.cell, self.u_ph, initial_state=self.initial_state, dtype=tf.float32 )
+                self.W1 = get_W1()
+                self.W2 = get_W2()
+                self.b = get_b()
 
                 self.loss = tf.reduce_sum(tf.square(self.x_ph - self.x_next)) 
                 self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
+                self.get_gradient = self.optimizer.compute_gradients(self.loss)
+                self.modify_gradient = calc_projected_gradient(self.get_gradient)
+                self.set_gradient = slef.optimizer.apply_gradients(self.modify_gradient)
                 self.train_op = self.optimizer.minimize(self.loss) 
 
                 tf.summary.scalar( 'loss' , self.loss )
