@@ -143,6 +143,11 @@ target_link_libraries(emgProcess ${catkin_LIBRARIES} bhand)
 
 add_dependencies(emgProcess ${catkin_EXPORTED_TARGETS})
 
+#gloveProcess
+add_executable(gloveProcess src/gloveProcess.cpp)
+
+target_link_libraries(gloveProcess ${catkin_LIBRARIES})
+
 #test
 add_executable(resWatch src/bhand_test.cpp)
 

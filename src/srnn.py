@@ -20,79 +20,6 @@ from DRNNCell_impl import DRNNCell
 MODE_PREDICTION = 0
 MODE_LEARNING = 1
 
-
-def weight_variable(shape):
-    initial = tf.truncated_normal( shape, stddev=0.1 )
-    return tf.Variable(initial, name='weights')
-
-def bias_variable(shape):
-    initial = tf.constant(0., shape=shape)
-    return tf.Variable(initial, name='biases')
-
-def variable_summaries(var, name):
-    with tf.name_scope('summaries'):
-        mean = tf.reduce_mean(var)
-        tf.summary.scalar('mean/' + name, mean)
-        
-        with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_sum(tf.square(var - mean)))
-        tf.summary.scalar('sttdev/' + name, stddev)
-        tf.summary.scalar('max/' + name, tf.reduce_max(var))
-        tf.summary.scalar('min/' + name, tf.reduce_min(var))
-        tf.summary.histogram(name, var)
-
-def nn_layer(input_tensor, input_dim, output_dim, layer_name, act=tf.nn.relu):
-    with tf.name_scope(layer_name):
-        with tf.name_scope('weights'):
-            weights = weight_variable([input_dim, output_dim])
-            variable_summaries(weights, layer_name + '/weights')
-        with tf.name_scope('biases'):
-            biases = bias_variable([output_dim])
-            variable_summaries(biases, layer_name + '/biases')
-        with tf.name_scope('Wx_plus_b'):
-            preactivate = tf.matmul(input_tensor, weights) + biases
-            tf.summary.histogram(layer_name + '/pre_activations', preactivate)
-
-        if act == None :
-            activations = preactivate
-        else :
-            activations = act(preactivate, 'activation')
-        
-        tf.summary.histogram(layer_name + '/activations', activations)
-        return activations
-
-def inference(xu_cur):
-
-    hidden1 = nn_layer(xu_cur, self.layer_in, self.layer_h, 'hidden1', act=tf.nn.relu)
-    hidden2 = nn_layer(hidden1, self.layer_h, self.layer_h , 'hidden2', act=tf.nn.relu)
-    
-    x_next = nn_layer(hidden2, self.layer_h, self.layer_out, 'x(k+1)', act=None)
-    
-#    sfm = tf.nn.softmax(fout)
-
-    keep_prob = tf.constant(1.0)
-    x_next_drop= tf.nn.dropout(fout,keep_prob=keep_prob) 
-    
-    return x_next_drop 
-
-def loss_function(fout, freal):
-    #loss_val = tf.losses.mean_squared_error(freal,fout,weights=1.0)
-    loss_val = tf.losses.softmax_cross_entropy(freal,fout,weights=1.0)
-
-    return tf.reduce_mean(loss_val)
-
-def training(loss, learning_rate):
-
-    tf.summary.scalar('loss',loss)
-
-    optimizer = tf.train.RMSPropOptimizer(learning_rate)
-
-    global_step = tf.Variable(0,name='global_step', trainable=False)
-
-    train_op = optimizer.minimize(loss, global_step=global_step)
-
-    return train_op
-
 def Cald_projected_gradient(grad):
 
     return grad
@@ -106,11 +33,10 @@ class RosTF():
         self.stateSampled = False
     
         ###Network Vars(Hyper Parameters)
-        self.size_x = 4
-        self.size_u = 2
+        self.size_x = 20
+        self.size_u = 8
         self.layer_in = self.size_x + self.size_u
         self.layer_out = self.size_x
-        self.layer_h = 8 
         self.batch_size = 20 
         self.learning_rate = 0.001
         self.seq_length = 5
@@ -121,8 +47,8 @@ class RosTF():
                 self.callbackEmg, 
                 queue_size=1)
 
-        self.subState = rospy.Subscriber('/rrbot/joint_states',
-                JointState,
+        self.subState = rospy.Subscriber('/finger_state',
+                Float32MultiArray,
                 self.callbackState, 
                 queue_size=1)
 
@@ -156,12 +82,9 @@ class RosTF():
                 self.initial_state = tf.placeholder(tf.float32, shape=[None,self.layer_out])
 
                 #DRNNNetwork
-                self.cell = DRNNCell(num_output=self.layer_out, num_units=[10,10,10], activation=tf.nn.relu) 
+                self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu) 
                 self.x_next, _states = tf.nn.dynamic_rnn( self.cell, self.u_ph, initial_state=self.initial_state, dtype=tf.float32 )
-                self.W1 = get_W1()
-                self.W2 = get_W2()
-                self.b = get_b()
-
+                
                 self.loss = tf.reduce_sum(tf.square(self.x_ph - self.x_next)) 
                 self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
                 self.get_gradient = self.optimizer.compute_gradients(self.loss)
@@ -222,7 +145,7 @@ class RosTF():
     def callbackState(self, msg):
         self.stateData = msg
         self.stateSampled = True
-    
+
     def enque_thread(self):
         print "enque_thread : start"
 
@@ -232,10 +155,10 @@ class RosTF():
         with self.coord.stop_on_exception():
             # Make sequence buffer 
             while True:
-                if self.stateSampled == True :
+                if self.stateSampled == True and self.emgSampled == True :
                     
-                    x_buf.append(self.stateData.position + self.stateData.velocity)
-                    u_buf.append(self.stateData.effort)
+                    x_buf.append(self.stateData)
+                    u_buf.append(self.emgData)
 
                     self.emgSampled = False
                     self.stateSampled = False
@@ -245,11 +168,10 @@ class RosTF():
 
             # Enqueue
             while not self.coord.should_stop():
-                #if self.emgSampled == True and self.stateSampled == True:
-                if self.stateSampled == True :
+                if self.emgSampled == True and self.stateSampled == True:
                     
-                    x_buf.append(self.stateData.position + self.stateData.velocity)
-                    u_buf.append(self.stateData.effort)
+                    x_buf.append(self.stateData)
+                    u_buf.append(self.emgData)
 
                     x0 = np.array( x_buf[0] )
                     x = np.array( x_buf[1:self.seq_length+1] )
@@ -315,8 +237,8 @@ class RosTF():
                 if self.stateSampled == True:
                     self.stateSampled = False
                    
-                    x0 = np.array( [self.stateData.position + self.stateData.velocity] )
-                    u = np.array( [[self.stateData.effort for _ in range(self.seq_length)]] )
+                    x0 = np.array( [self.stateData] )
+                    u = np.array( [[self.emgData for _ in range(self.seq_length)]] )
 
                     feed_dict = { self.u_ph : u, 
                                   self.initial_state : x0  } 
@@ -402,7 +324,7 @@ if __name__ == '__main__':
     parser.add_argument(
             '-save',
             type=bool,
-            default=True,
+            default=False,
             help="Save model"
             )
     
