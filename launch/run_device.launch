@@ -1,8 +1,10 @@
 <launch>
 	<include file="$(find bhand)/launch/load.launch"/>
 
-	<node pkg="ros_myo" type="myonode.py" name="myo_raw" args="/dev/ttyACM0"/>
-	<node pkg="comm_tcp" type="glove_server_node" name="glove_node" output="screen">
+	<node pkg="ros_myo" type="myonode.py" name="myo_raw" output="screen" args="/dev/ttyACM0"/>
+	<node pkg="vmg30" type="vmg30_serial" name="vmg30_node" output="screen" args="/dev/ttyUSB0"/>
+
+	<!--node pkg="comm_tcp" type="glove_server_node" name="glove_node" output="screen">
 		<param name="port_number" value="9998"/>
-	</node>
+	</node-->
 </launch>

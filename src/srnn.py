@@ -20,7 +20,7 @@ from DRNNCell_impl import DRNNCell
 MODE_PREDICTION = 0
 MODE_LEARNING = 1
 
-def Cald_projected_gradient(grad):
+def calc_projected_gradient(grad):
 
     return grad
 
@@ -33,13 +33,13 @@ class RosTF():
         self.stateSampled = False
     
         ###Network Vars(Hyper Parameters)
-        self.size_x = 20
+        self.size_x = 10
         self.size_u = 8
         self.layer_in = self.size_x + self.size_u
         self.layer_out = self.size_x
         self.batch_size = 20 
         self.learning_rate = 0.001
-        self.seq_length = 5
+        self.seq_length = 1
             
         ###ROS Init
         self.subEmg = rospy.Subscriber('/actEMG',
@@ -89,16 +89,11 @@ class RosTF():
                 self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
                 self.get_gradient = self.optimizer.compute_gradients(self.loss)
                 self.modify_gradient = calc_projected_gradient(self.get_gradient)
-                self.set_gradient = slef.optimizer.apply_gradients(self.modify_gradient)
+                self.set_gradient = self.optimizer.apply_gradients(self.modify_gradient)
                 self.train_op = self.optimizer.minimize(self.loss) 
 
                 tf.summary.scalar( 'loss' , self.loss )
-
-                #SRNNNetwork
-                #self.x_next = inference( self.xu_ph ) 
-                #self.loss = loss_function( self.x_next, self.x_ph )
-                #self.train_op = training( self.loss, self.learning_rate ) 
-                   
+                  
                 #Summary
                 self.summary = tf.summary.merge_all()
                 self.summary_writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
@@ -143,7 +138,7 @@ class RosTF():
         self.emgSampled = True
 
     def callbackState(self, msg):
-        self.stateData = msg
+        self.stateData = msg.data
         self.stateSampled = True
 
     def enque_thread(self):

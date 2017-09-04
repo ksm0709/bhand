@@ -4,10 +4,12 @@
 #include "std_msgs/Float32MultiArray.h"
 #include "dsp.h"
 
+#include "string.h"
 
 #define MODE_RUN	0
 #define MODE_MIN	1
 #define MODE_MAX	2
+#define MODE_SAVE	3
 
 #define SAMPLIG_HZ	100
 #define DeltaT		1/SAMPLIG_HZ
@@ -27,19 +29,28 @@ void showParam(void);
 int main(int argc, char **argv)
 {
 	char mode = -1;
-	FILE* fp = fopen("/home/taeho/catkin_ws/src/bhand/src/tf_data/glove_data.csv","w");
-
+	char filedir[100] = "/home/taeho/catkin_ws/src/bhand/src/tf_data/";
+	
 	if( argc )
 		switch( argv[1][1] )
 		{
 			case 'l': mode = MODE_MIN; break;
 			case 'h': mode = MODE_MAX; break;
 			case 'r': mode = MODE_RUN; break;
-			default: printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN \n\n");
+			case 's': mode = MODE_SAVE;
+					  if( argc < 2 )
+					  {
+						  printf("\n  Filename required!\n\n");
+						  return 0;
+					  }
+					  strcpy(filedir+strlen(filedir),argv[2]);
+					  break;
+			default: printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN \n\t-s 'filename' : MODE_SAVE\n\n");
 					 return 0;
 					 break;
 		}
-
+	
+	
 	ros::init(argc,argv,"gloveProcess");
 	ros::NodeHandle nh;
 
@@ -72,15 +83,12 @@ int main(int argc, char **argv)
 		case MODE_RUN:
 
 			ROS_INFO("mode : MODE_RUN");
+			showParam();
 
 			while(ros::ok())
 			{
 				if( readFlag )
 				{
-					for(i=0;i<DATA_SIZE-1;i++)
-						fprintf(fp,"%.0lf,",rawData[i]);
-					fprintf(fp,"%.0lf\n",rawData[DATA_SIZE-1]);
-
 					for(i=0;i<DATA_SIZE;i++)
 					{
 						temp = (float)(rawData[i]-min[i])/(max[i]-min[i]);
@@ -97,7 +105,7 @@ int main(int argc, char **argv)
 					}
 
 					msg.data.clear();
-					msg.data.assign( resData, resData + 20 );
+					msg.data.assign( resData, resData + STATE_SIZE );
 					pub.publish( msg );					
 
 					readFlag = false;
@@ -189,8 +197,28 @@ int main(int argc, char **argv)
 			system("rosparam dump ~/catkin_ws/src/bhand/config/gloveConfig.yaml bhand");
 
 			break;
-	}
 
+		case MODE_SAVE:
+			ROS_INFO("mode : MODE_SAVE");
+			FILE* fp = fopen(filedir,"w");
+
+			while(ros::ok())
+			{
+				if( readFlag )
+				{
+					for(i=0;i<DATA_SIZE-1;i++)
+						fprintf(fp,"%.0lf,",rawData[i]);
+					fprintf(fp,"%.0lf\n",rawData[DATA_SIZE-1]);
+
+					readFlag = false;
+				}
+				ros::spinOnce();
+				loop_rate.sleep();
+			}
+
+			fclose(fp);
+			break;
+	}
 
 	return 0;
 }
@@ -218,7 +246,7 @@ void showParam(void)
 	for(i=0;i<DATA_SIZE;i++)
 	{
 		printf("%.1f",max[i]);
-		if( i < 9 )
+		if( i < DATA_SIZE-1 )
 			printf(",");
 		else
 			printf("]\n");
@@ -228,9 +256,11 @@ void showParam(void)
 	for(i=0;i<DATA_SIZE;i++)
 	{
 		printf("%.1f",min[i]);
-		if( i < 9 )
+		if( i < DATA_SIZE-1 )
 			printf(",");
 		else
 			printf("]\n");
 	}
+
+	printf("\n");
 }

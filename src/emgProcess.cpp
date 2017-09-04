@@ -8,6 +8,8 @@
 #include "dsp.h"
 #include "MuscleBase.h"
 
+#define USE_MYO		1
+
 #define MODE_RUN	0
 #define MODE_MIN	1
 #define MODE_MAX	2
@@ -15,7 +17,7 @@
 
 MuscleBase muscle;
 
-int channel = 4;
+int channel;
 
 float resData[channel_MAX];
 float mavData[channel_MAX];
@@ -55,16 +57,22 @@ int main(int argc, char **argv)
 	ros::init(argc,argv,"emgProcess");
 	ros::NodeHandle nh;
 
-//	ros::Subscriber sub = nh.subscribe("myo_emg", 1, callback_myo_emg); 
+#if USE_MYO == 1
+	ros::Subscriber sub = nh.subscribe("myo_emg", 1, callback_myo_emg); 
+	channel = 8;
+#else
 	ros::Subscriber sub = nh.subscribe("rawEMG",10, callback_rawEMG);
+	channel = 8;
+#endif
+
 	ros::Publisher pub = nh.advertise<std_msgs::Float32MultiArray>("actEMG",10);
 //	ros::Publisher pubf = nh.advertise<bhand::EmgArray>("firEMG",10);
 
 	ros::Rate loop_rate(500);
 	
+	std::vector<float> list;
 	bhand::EmgArray fir_msg;	
 	std_msgs::Float32MultiArray msg;
-	std::vector<float> list;
 	float tempAct;
 	float tempRms;
 	int i,save_count=0;
@@ -76,11 +84,11 @@ int main(int argc, char **argv)
 	
 	nh.getParam("Emg/max", list);
 	for(i=0;i<list.size();i++)
-		max[i] = list[i];
+		max[i] = (float)list[i];
 
 	nh.getParam("Emg/min", list);
 	for(i=0;i<list.size();i++)
-		min[i] = list[i];	
+		min[i] = (float)list[i];	
 
 	ROS_INFO("emgProcess node start %s",argv[1]);
 	
@@ -96,12 +104,8 @@ int main(int argc, char **argv)
 			{
 				if( readFlag )
 				{
-//					fir_msg.data.clear();
 					for(i=0;i<channel;i++)
 					{
-//						rawData[i] = firFilter_update(i, rawData[i]);
-//						fir_msg.data.push_back(rawData[i]);
-
 						tempAct = (float)(abs(rawData[i])-min[i])/(max[i]-min[i]);
 					
 						if( tempAct > 1 ) 
@@ -120,25 +124,6 @@ int main(int argc, char **argv)
 					msg.data.assign( resData, resData + channel );
 					pub.publish( msg );					
 
-//					fprintf(datafp,"%d %d\n",(int)resData[2], (int)mavData[2]);
-
-//					pubf.publish(fir_msg);
-//
-//					int posture_index = 4;
-//
-//					for(i=0;i<channel;i++)
-//						fprintf(datafp,"%d,",(int)resData[i]);
-//					for(i=1;i<=5;i++)
-//					{
-//						if( posture_index == i )
-//							fprintf(datafp,"1"); 
-//						else
-//							fprintf(datafp,"0");
-//						if( i!= 5 )
-//							fprintf(datafp,",");
-//					}
-//					fprintf(datafp,"\n");
-//					
 					readFlag = false;
 				}
 
@@ -253,7 +238,7 @@ void callback_myo_emg(const bhand::EmgArray::ConstPtr& arr)
 
 	for(std::vector<int16_t>::const_iterator it = arr->data.begin(); it != arr->data.end(); ++it )
 	{
-		rawData[i] = *it;
+		rawData[i] = (float)*it;
 		i++;
 	}
 
@@ -300,21 +285,6 @@ void showParam(void)
 		else
 			printf("]\n");
 	}
+
+	printf("\n");
 }
-
-void saveParam(ros::NodeHandle &nh)
-{
-	int i;
-	std::vector<float> list;
-	
-	for(i=0;i<channel;i++)
-		list.push_back(max[i]);
-	nh.setParam("Emg/max",list);
-	
-	list.clear();
-	for(i=0;i<channel;i++)
-		list.push_back(min[i]);
-	nh.setParam("Emg/min",list);
-
-	system("rosparam dump ~/catkin_ws/src/bhand/config/emgConfig.yaml bhand");
-}	
