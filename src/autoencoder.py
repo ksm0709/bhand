@@ -8,7 +8,7 @@ import rospy
 from std_msgs.msg import Float32MultiArray
 
 
-def Autoencoder(x, layer=[], act=tf.sigmoid):
+def Autoencoder(x, layer=[], act=tf.sigmoid, keep_prob=1.0):
     # layer[0] : input layer
     # x : input vector
 
@@ -42,7 +42,9 @@ def Autoencoder(x, layer=[], act=tf.sigmoid):
     Embeding = model[layer_num-1]
     Reconstruct = model[-1]
 
-    return Embeding, Reconstruct
+    Reconstruct_dropout = tf.nn.dropout(Reconstruct, keep_prob=keep_prob)
+
+    return Embeding, Reconstruct_dropout
 
 
 

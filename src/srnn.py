@@ -40,6 +40,7 @@ def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None):
     mse_loss = tf.reduce_mean(tf.square(y_real - y_out))
     reg_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,scope=scope)
     loss = tf.add_n([mse_loss] + reg_loss)
+
     optimizer_op = optimizer_dict[optimizer]
     train_op = optimizer_op.minimize(loss) 
 
@@ -59,8 +60,8 @@ class RosTF():
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 20 
-        self.learning_rate = 0.001
+        self.batch_size = 10
+        self.learning_rate = 0.01
         self.seq_length = 1
             
         ###ROS Init
@@ -107,21 +108,21 @@ class RosTF():
 
                 #Autoencoder for EMG
                 with tf.variable_scope("AE_u"):
-                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.relu)
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, keep_prob=1.0)
 
                     self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u")
                     tf.summary.scalar( 'ae_u_loss' , self.loss_zu )
 
                 #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
-                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.relu)
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, keep_prob=1.0)
 
                     self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x")
                     tf.summary.scalar( 'ae_x_loss' , self.loss_zx )
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu) 
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu, keep_prob=1.0) 
                     self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
@@ -137,12 +138,13 @@ class RosTF():
                 #Init Variable
                 self.init = tf.global_variables_initializer()
                 self.sess.run(self.init)
-                self.saver = tf.train.Saver()
-
-                # Load Model ################################################# 
+                
+                # Saver / Load Model ######################################### 
                 self.model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
                 self.saver_on = args.save
                 self.loader_on = args.load 
+                
+                self.saver = tf.train.Saver()
 
                 if self.loader_on == True:
                     self.saver.restore(self.sess,self.model_dir)
@@ -150,12 +152,12 @@ class RosTF():
 
                 #Queue & Coordinator
                 self.coord = tf.train.Coordinator()
-                self.que = tf.FIFOQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]], # u, x, x0
-                                        dtypes=[tf.float32, tf.float32, tf.float32],
-                                        capacity=1000)
-                #self.que = tf.RandomShuffleQueue(shapes=[[self.layer_in],[self.layer_out]],
-                #                                 dtypes=[tf.float32, tf.float32],
-                #                                 capacity=100, min_after_dequeue=20, seed=2121)
+                #self.que = tf.FIFOQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]], # u, x, x0
+                #                        dtypes=[tf.float32, tf.float32, tf.float32],
+                #                        capacity=1000)
+                self.que = tf.RandomShuffleQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]],
+                                                 dtypes=[tf.float32, tf.float32, tf.float32],
+                                                 capacity=1000, min_after_dequeue=800, seed=2121)
 
 
                 self.queClose_op = self.que.close(cancel_pending_enqueues=True)
@@ -185,7 +187,7 @@ class RosTF():
                                                          feed_dict=feed_dict)
                                                             
         if step % 10 == 0:
-           print "step : {0}   loss_AE_x : {1}    loss_AE_u : {2}    loss_drnn : {3}".format(step,loss_zx, loss_zu, loss_drnn)
+           print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {3}".format(step,loss_zx, loss_zu, loss_drnn)
 
            summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
            self.summary_writer.add_summary( summary_str, step )
@@ -204,7 +206,7 @@ class RosTF():
 
         if step % 10 == 0 :
 
-            print "step : {0}   loss_AE_x : {1}    loss_AE_u : {2}".format(step,loss_zx, loss_zu)
+            print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx, loss_zu)
 
             summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
             self.summary_writer.add_summary( summary_str, step )
@@ -220,7 +222,7 @@ class RosTF():
 
         if step % 10 == 0 :
 
-            print "step : {0}   loss_drnn : {1}".format(step, loss_drnn)
+            print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn)
 
             summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
             self.summary_writer.add_summary( summary_str, step )
