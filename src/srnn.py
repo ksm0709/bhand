@@ -18,19 +18,30 @@ from sensor_msgs.msg import JointState
 from DRNNCell_impl import DRNNCell
 from autoencoder import Autoencoder
 
-MODE_PREDICTION = 3
-MODE_TRAIN_ALL = 0
-MODE_TRAIN_AE = 1
-MODE_TRAIN_DRNN = 2
+MODE_PREDICTION = 0
+MODE_TRAIN_ALL = 1
+MODE_TRAIN_AE = 2
+MODE_TRAIN_DRNN = 3
+
+ADAM_OPTIMIZER = 0
+GD_OPTIMIZER = 1
+ADAGRAD_OPTIMIZER = 2
 
 def calc_projected_gradient(grad):
 
     return grad
 
-def set_optimizer(y_real,y_out,rate):
-    loss = tf.reduce_sum(tf.square(y_real - y_out)) 
-    optimizer = tf.train.AdamOptimizer(rate)
-    train_op = optimizer.minimize(loss) 
+def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None):
+
+    optimizer_dict = { ADAM_OPTIMIZER : tf.train.AdamOptimizer(rate),
+                       GD_OPTIMIZER : tf.train.GradientDescentOptimizer(rate),
+                       ADAGRAD_OPTIMIZER : tf.train.AdagradOptimizer(rate)}
+
+    mse_loss = tf.reduce_mean(tf.square(y_real - y_out))
+    reg_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,scope=scope)
+    loss = tf.add_n([mse_loss] + reg_loss)
+    optimizer_op = optimizer_dict[optimizer]
+    train_op = optimizer_op.minimize(loss) 
 
     return train_op, loss
 
@@ -49,7 +60,7 @@ class RosTF():
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
         self.batch_size = 20 
-        self.learning_rate = 0.01
+        self.learning_rate = 0.001
         self.seq_length = 1
             
         ###ROS Init
@@ -94,38 +105,42 @@ class RosTF():
                 self.x0Enque_ph = tf.placeholder(tf.float32, shape=[self.size_x])
                 self.initial_state = tf.placeholder(tf.float32, shape=[None,self.size_zx])
 
-                #Autoencoder
+                #Autoencoder for EMG
                 with tf.variable_scope("AE_u"):
-                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1))
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.relu)
+
+                    self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u")
+                    tf.summary.scalar( 'ae_u_loss' , self.loss_zu )
+
+                #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
-                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1))
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.relu)
+
+                    self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x")
+                    tf.summary.scalar( 'ae_x_loss' , self.loss_zx )
 
                 #DRNNNetwork
-                self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu) 
-                self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
+                with tf.variable_scope("DRNN"):
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu) 
+                    self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
-                #Optimizer
-                self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate)
-                self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate)
-                self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate)
+                    self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
+                    tf.summary.scalar( 'drnn_loss' , self.loss_drnn )
+
+                # Dict of train functions 
                 self.train_func = {
-                    MODE_TRAIN_AE : self.train_ae,
-                    MODE_TRAIN_DRNN : self.train_drnn,
-                    MODE_TRAIN_ALL : self.train_all,
+                    MODE_TRAIN_AE : self.func_train_ae,
+                    MODE_TRAIN_DRNN : self.func_train_drnn,
+                    MODE_TRAIN_ALL : self.func_train_all,
                     }
 
-                tf.summary.scalar( 'drnn_loss' , self.loss_drnn )
-                tf.summary.scalar( 'ae_u_loss' , self.loss_zu )
-                tf.summary.scalar( 'ae_x_loss' , self.loss_zx )
-
-                
                 #Init Variable
                 self.init = tf.global_variables_initializer()
                 self.sess.run(self.init)
                 self.saver = tf.train.Saver()
 
                 # Load Model ################################################# 
-                self.model_dir = "~/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
+                self.model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
                 self.saver_on = args.save
                 self.loader_on = args.load 
 
@@ -160,7 +175,7 @@ class RosTF():
     
     
 
-    def train_all(self,step,feed_dict):
+    def func_train_all(self,step,feed_dict):
         _,_,_,loss_zx,loss_zu,loss_drnn = self.sess.run([self.train_zx, 
                                                          self.train_zu, 
                                                          self.train_drnn, 
@@ -181,7 +196,7 @@ class RosTF():
 
         return 0
 
-    def train_ae(self,step,feed_dict):
+    def func_train_ae(self,step,feed_dict):
         _,_,loss_zx,loss_zu = self.sess.run([self.train_zx, 
                                              self.train_zu, 
                                              self.loss_zx, 
@@ -199,7 +214,7 @@ class RosTF():
                 self.saver.save(self.sess, self.model_dir)
 
         return 0
-    def train_drnn(self,step,feed_dict):
+    def func_train_drnn(self,step,feed_dict):
 
         _,loss_drnn = self.sess.run([self.train_drnn, self.loss_drnn], feed_dict=feed_dict)
 
@@ -281,6 +296,7 @@ class RosTF():
 
                     u, x, x0 = self.sess.run( self.deque_op )
 
+                    # x0 reshape cosidering sequence length
                     x0 = np.reshape(x0, [self.batch_size,1,self.size_x])
 
                     # Encoding
@@ -288,6 +304,7 @@ class RosTF():
                     zx = self.sess.run( self.zx , feed_dict={ self.x_ph : x })
                     zx0 = self.sess.run( self.zx , feed_dict={ self.x_ph : x0 })
 
+                    # zx0 reshape removing sequence length dim
                     zx0 = np.reshape(zx0, [self.batch_size,self.size_zx])
                   
                     feed_dict = { self.u_ph : u,
@@ -404,7 +421,7 @@ if __name__ == '__main__':
     parser.add_argument(
             '-log_dir',
             type=str,
-            default='~/catkin_ws/src/bhand/src/tf_log',
+            default='/home/taeho/catkin_ws/src/bhand/src/tf_log',
             help="Logging directory ( default : tf_log )"
             )
 

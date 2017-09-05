@@ -35,16 +35,15 @@ class DRNNCell(RNNCell):
 
     hidden = []
 
-    with variable_scope("drnn"):
-        scope_name = "Layer1" 
-        hidden.append( layers.fully_connected(s, self._num_units[0], activation_fn=self._activation, scope=scope_name) )
+    scope_name = "Layer1" 
+    hidden.append( layers.fully_connected(s, self._num_units[0], activation_fn=self._activation, scope=scope_name) )
 
-        for l in range(1,self._num_layers):
-            scope_name = "Layer{0}".format(l+1) 
-            hidden.append( layers.fully_connected(hidden[l-1], self._num_units[l], activation_fn=self._activation, scope=scope_name) )
+    for l in range(1,self._num_layers):
+        scope_name = "Layer{0}".format(l+1) 
+        hidden.append( layers.fully_connected(hidden[l-1], self._num_units[l], activation_fn=self._activation, scope=scope_name) )
 
-        scope_name = "Layer{0}".format(self._num_layers+1)
-        output = layers.fully_connected(hidden[-1], self._num_output, activation_fn=None, scope=scope_name)
+    scope_name = "Layer{0}".format(self._num_layers+1)
+    output = layers.fully_connected(hidden[-1], self._num_output, activation_fn=None, scope=scope_name)
 
     return output, output
 
