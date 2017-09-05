@@ -15,7 +15,7 @@
 #define DeltaT		1/SAMPLIG_HZ
 
 #define DATA_SIZE	5
-#define STATE_SIZE	10
+#define STATE_SIZE	5
 
 float resData[STATE_SIZE];
 float rawData[DATA_SIZE];
