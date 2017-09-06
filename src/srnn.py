@@ -22,14 +22,11 @@ MODE_PREDICTION = 0
 MODE_TRAIN_ALL = 1
 MODE_TRAIN_AE = 2
 MODE_TRAIN_DRNN = 3
+MODE_SAVE_DATA = 4
 
 ADAM_OPTIMIZER = 0
 GD_OPTIMIZER = 1
 ADAGRAD_OPTIMIZER = 2
-
-def calc_projected_gradient(grad):
-
-    return grad
 
 def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None):
 
@@ -52,6 +49,7 @@ class RosTF():
         ###Common Vars
         self.emgSampled = False
         self.stateSampled = False
+        self.filenameHeader = args.filename
 
         ###Network Vars(Hyper Parameters)
         self.size_zx = 3
@@ -67,7 +65,7 @@ class RosTF():
         ###ROS Init
         self.subEmg = rospy.Subscriber('/actEMG',
                 Float32MultiArray,
-                self.callbackEmg, 
+                self.callbackEmg,
                 queue_size=1)
 
         self.subState = rospy.Subscriber('/finger_state',
@@ -157,13 +155,28 @@ class RosTF():
                 #                        capacity=1000)
                 self.que = tf.RandomShuffleQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]],
                                                  dtypes=[tf.float32, tf.float32, tf.float32],
-                                                 capacity=1000, min_after_dequeue=800, seed=2121)
+                                                 capacity=3000, min_after_dequeue=2000, seed=2121)
 
 
                 self.queClose_op = self.que.close(cancel_pending_enqueues=True)
                 self.enque_op = self.que.enqueue([self.uEnque_ph, self.xEnque_ph, self.x0Enque_ph])
                 self.deque_op = self.que.dequeue_many(self.batch_size) 
                 self.que_size = self.que.size()
+
+                #File input pipeline
+                filename_queue_emg = tf.train.string_input_producer(["tf_data/default_emg.csv"],shuffle=False, name='filename_queue_emg')
+                filename_queue_state = tf.train.string_input_producer(["tf_data/default_state.csv"],shuffle=False, name='filename_queue_state')
+
+                reader = tf.TextLineReader()
+                key_emg, value_emg = reader.read(filename_queue_emg)
+                key_state, value_state = reader.read(filename_queue_state)
+
+                csv_data_emg = tf.decode_csv(value_emg, record_defaults=[[1.] for _ in range(self.size_u)])
+                csv_data_steate = tf.decode_csv(value_state, record_defaults=[[1.] for _ in range(self.size_x)])
+
+                self.get_data_emg = tf.train.batch([csv_data_emg],batch_size=1)
+                self.get_data_state = tf.train.batch([csv_data_state], batch_size=1)
+
 
                 #ETC
                 self.f4ph = tf.placeholder( tf.float32, shape=[ self.size_x ])
@@ -369,42 +382,104 @@ class RosTF():
                     self.x_predict = result[0,0,:]
 
                 time.sleep(0.001)
+    
+    def file_process_thread(self):
+        print "file_process_thread : start"
 
+        with self.coord.stop_on_exception():
+
+            # Non-ROS : get data from files
+            if args.ros == False:
+                while not self.coord.should_stop():
+
+                    self.emgData = self.sess.run( self.get_data_emg )
+                    self.stateData = self.sess.run( self.get_data_state )
+
+                    self.emgSampled = True
+                    self.stateSampled = True
+                
+                    time.sleep(0.001)
+
+            # Using ROS & Mode is data saving mode 
+            elif args.mode == MODE_SAVE_DATA:
+                
+                fEmg = open(self.filenameHeader+"_emg.csv", 'w')
+                fState = open(self.filenameHeader+"_state.csv", 'w')
+                sample=0
+
+                while not self.coord.should_stop():
+                    if self.emgSampled == True and self.stateSampled == True :
+
+                        for d in self.emgData[:-1]:
+                            fEmg.write("{:f},".format(d)) 
+                        fEmg.write("{:f}\n".format(self.emgData[-1]))
+
+                        for d in self.stateData[:-1]:
+                            fState.write("{:f},".format(d))
+                        fState.write("{:f}\n".format(self.stateData[-1]))
+
+                        sample = sample + 1
+                        print "Sample {:d} is saved".format(sample)
+
+                        self.emgSampled = False
+                        self.stateSampled = False
+                
+                    time.sleep(0.001)
+            else:
+                return 0 
 
     def main(self):
 
         threads = [ threading.Thread(target=self.enque_thread) ,
                     threading.Thread(target=self.train_thread) ,
-                    threading.Thread(target=self.predict_thread) ]    
+                    threading.Thread(target=self.predict_thread),
+                    threading.Thread(target=self.file_process_thread) ]    
 
         self.coord.register_thread( threads[0] )
         self.coord.register_thread( threads[1] )
         self.coord.register_thread( threads[2] )
+        self.coord.register_thread( threads[3] )
 
-        
-        # Train thread or Predict thread start
-        if args.mode == MODE_PREDICTION:
-            threads[2].start() #Predict thread
-        
+        # Using ROS : get data from ros messages 
+        if args.ros == True :
+            #Start ros
             rospy.init_node('Estimator')
-            rate = rospy.Rate(100)            
+            rate = rospy.Rate(500)
+        
+            #Start threads
+            if args.mode == MODE_PREDICTION:
+                threads[2].start() #Predict thread
+            elif args.mode == MODE_SAVE_DATA:
+                threads[3].start() #File process(writing) thread
+            else : 
+                threads[0].start() #Enque thread
+                threads[1].start() #Train thread
 
+            #Run
             with self.coord.stop_on_exception():
                 while not rospy.is_shutdown() and not self.coord.should_stop():
-                    rate.sleep() 
+                    rate.sleep()
         
-        else : 
-            threads[0].start() #Enque thread
-            threads[1].start() #Train thread
-            
-            rospy.init_node('Estimator')
-            rate = rospy.Rate(100)            
+        else : # non-ROS : get data from files
 
+            #Start threads
+            if args.mode == MODE_PREDICTION:
+                threads[3].start() #File process(read) start
+                threads[2].start() #Predict thread
+            elif args.mode == MODE_SAVE_DATA:
+                print "Can not save data in non-ros configuration!"
+                return 0
+            else :
+                threads[3].start() #File process(read) start
+                threads[0].start() #Enque thread
+                threads[1].start() #Train thread
+
+            #Run
             with self.coord.stop_on_exception():
-                while not rospy.is_shutdown():
-                    rate.sleep() 
-        
-
+                while not self.coord.should_stop():
+                    time.sleep(0.002)
+            
+        #Stop this program
         self.sess.run( self.queClose_op )
         self.coord.request_stop()
         self.coord.join(threads) 
@@ -417,28 +492,42 @@ if __name__ == '__main__':
             '-mode',
             type=int,
             default=0,
-            help="Mode configuration [ 0: prediction only(default) , 1: train all, 2: train AE, 3: train DRNN ]"
+            help="(INT) Mode configuration [ 0: prediction(default) , 1: train all, 2: train AE, 3: train DRNN, 4: data save ]"
             )
+    
+    parser.add_argument(
+            '-ros',
+            type=bool,
+            default=True,
+            help="(BOOL) Use ros if it is True(default)"
+    )
+
+    parser.add_argument(
+            '-filename',
+            type=str,
+            default="default",
+            help="(STR) File name header => Data will be saved in 'filenameHeader'_emg.csv ( Default : 'default' )" 
+    )
    
     parser.add_argument(
             '-log_dir',
             type=str,
             default='/home/taeho/catkin_ws/src/bhand/src/tf_log',
-            help="Logging directory ( default : tf_log )"
+            help="(STR) Logging directory ( default : tf_log )"
             )
 
     parser.add_argument(
             '-load',
             type=bool,
             default=False,
-            help="Load model"
+            help="(BOOL) Load model( default : False )"
             )
 
     parser.add_argument(
             '-save',
             type=bool,
             default=False,
-            help="Save model"
+            help="(BOOL) Save model( default : False )"
             )
 
     args, unparsed = parser.parse_known_args()
