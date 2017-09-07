@@ -28,15 +28,25 @@ ADAM_OPTIMIZER = 0
 GD_OPTIMIZER = 1
 ADAGRAD_OPTIMIZER = 2
 
-def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None):
+
+def kl_divergence(p, q):
+    return p*tf.log(p/q) + (1-p)*tf.log((1-p)/(1-q))
+
+def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None,add_loss=0):
 
     optimizer_dict = { ADAM_OPTIMIZER : tf.train.AdamOptimizer(rate),
                        GD_OPTIMIZER : tf.train.GradientDescentOptimizer(rate),
                        ADAGRAD_OPTIMIZER : tf.train.AdagradOptimizer(rate)}
 
     mse_loss = tf.reduce_mean(tf.square(y_real - y_out))
+    cross_entropy_loss = tf.reduce_sum( -y_real*tf.log(y_out))
     reg_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,scope=scope)
-    loss = tf.add_n([mse_loss] + reg_loss)
+
+    if add_loss == 0:
+        loss = tf.add_n(10000*[mse_loss] + reg_loss)
+    else:
+        loss = tf.add_n(10000*[mse_loss] + reg_loss + [add_loss])
+
 
     optimizer_op = optimizer_dict[optimizer]
     train_op = optimizer_op.minimize(loss) 
@@ -53,7 +63,7 @@ class RosTF():
 
         ###Network Vars(Hyper Parameters)
         self.size_zx = 3
-        self.size_zu = 6
+        self.size_zu = 5
         self.size_x = 5
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
@@ -61,6 +71,8 @@ class RosTF():
         self.batch_size = 10
         self.learning_rate = 0.01
         self.seq_length = 1
+        self.sparsity_target = 0.3
+        self.sparsity_weight = 0.2
             
         ###ROS Init
         self.subEmg = rospy.Subscriber('/actEMG',
@@ -79,6 +91,8 @@ class RosTF():
 
             
         ###Tensorflow Init 
+
+        #Make log file for model check
         if tf.gfile.Exists(args.log_dir):
             tf.gfile.DeleteRecursively(args.log_dir)
         tf.gfile.MakeDirs(args.log_dir)
@@ -86,41 +100,46 @@ class RosTF():
 
         #Build Graph
         self.graph = tf.Graph()
-
         with self.graph.as_default():
         
-            #Session
+            #Make Session
             self.sess = tf.Session()
-        
             with self.sess.as_default():
           
                 #Placeholders
-                self.zu_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zu])
-                self.zx_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zx])
-                self.u_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_u])
-                self.x_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_x])
-                self.uEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_u])
+                self.zu_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zu]) # Embeded U
+                self.zx_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zx]) # Embeded X
+                self.u_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_u])   # U (emg)
+                self.x_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_x])   # X (state)
+                self.uEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_u]) 
                 self.xEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_x])
                 self.x0Enque_ph = tf.placeholder(tf.float32, shape=[self.size_x])
                 self.initial_state = tf.placeholder(tf.float32, shape=[None,self.size_zx])
 
                 #Autoencoder for EMG
                 with tf.variable_scope("AE_u"):
-                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, keep_prob=1.0)
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, 
+                                                                                                   keep_prob=1.0,
+                                                                                                   l2_reg=0.001)
 
-                    self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u")
+                    zu_mean = tf.reduce_mean(self.zu, axis=0)
+                    sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zu_mean))
+                    self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u", add_loss=sparsity_loss)
                     tf.summary.scalar( 'ae_u_loss' , self.loss_zu )
 
                 #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
-                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, keep_prob=1.0)
-
-                    self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x")
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, 
+                                                                                                   keep_prob=1.0,
+                                                                                                   l2_reg=0.001)
+                    zx_mean = tf.reduce_mean(self.zx, axis=0)
+                    sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zx_mean))
+                    self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x", add_loss=sparsity_loss)
                     tf.summary.scalar( 'ae_x_loss' , self.loss_zx )
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[40,30], activation=tf.nn.relu, keep_prob=1.0) 
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[20], activation=tf.nn.elu, keep_prob=1.0) 
                     self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
@@ -139,7 +158,7 @@ class RosTF():
                 
                 # Saver / Load Model ######################################### 
                 self.model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
-                self.saver_on = args.save
+                self.saver_on = args.save  
                 self.loader_on = args.load 
                 
                 self.saver = tf.train.Saver()
@@ -164,18 +183,20 @@ class RosTF():
                 self.que_size = self.que.size()
 
                 #File input pipeline
-                filename_queue_emg = tf.train.string_input_producer(["tf_data/default_emg.csv"],shuffle=False, name='filename_queue_emg')
-                filename_queue_state = tf.train.string_input_producer(["tf_data/default_state.csv"],shuffle=False, name='filename_queue_state')
+                filename_queue_emg = tf.train.string_input_producer(["tf_data/emg_state/1_emg.csv"],shuffle=False, name='filename_queue_emg')
+                filename_queue_state = tf.train.string_input_producer(["tf_data/emg_state/1_state.csv"],shuffle=False, name='filename_queue_state')
 
-                reader = tf.TextLineReader()
-                key_emg, value_emg = reader.read(filename_queue_emg)
-                key_state, value_state = reader.read(filename_queue_state)
+                reader_emg = tf.TextLineReader()
+                reader_state = tf.TextLineReader()
+                key_emg, value_emg = reader_emg.read(filename_queue_emg)
+                key_state, value_state = reader_state.read(filename_queue_state)
 
                 csv_data_emg = tf.decode_csv(value_emg, record_defaults=[[1.] for _ in range(self.size_u)])
-                csv_data_steate = tf.decode_csv(value_state, record_defaults=[[1.] for _ in range(self.size_x)])
+                csv_data_state = tf.decode_csv(value_state, record_defaults=[[1.] for _ in range(self.size_x)])
 
                 self.get_data_emg = tf.train.batch([csv_data_emg],batch_size=1)
                 self.get_data_state = tf.train.batch([csv_data_state], batch_size=1)
+                self.que_thread = tf.train.start_queue_runners(sess=self.sess, coord=self.coord)
 
 
                 #ETC
@@ -369,7 +390,7 @@ class RosTF():
                         rx0 = self.sess.run(self.rx, feed_dict={ self.x_ph : x0 })
                         ru = self.sess.run(self.ru, feed_dict={ self.u_ph : u})
                         
-                        err_drnn = self.x_predict - zx0[0,:]
+                        err_drnn = zx_predict - zx0[0,:]
                         err_x0 = x0[0,:] - rx0[0,:]
                         err_u = u[0,0,:] - ru[0,0,:]
 
@@ -377,9 +398,13 @@ class RosTF():
                         l2err_x0 = np.linalg.norm(err_x0,2)
                         l2err_u = np.linalg.norm(err_u,2) 
 
-                        print " [ Estimation erros ]\nDRNN : {0}\nAE_x : {1}\nAE_u : {2}".format(l2err_drnn, l2err_x0, l2err_u)
+                        print "******DRNN******\nR:{0}\nE:{1}\n******AE_x******\nR:{2}\nE:{3}\n******AE_u******\nR:{4}\nE:{5}".format(zx0[0,:],zx_predict, x0[0,:], rx0[0,:], u[0,0,:], ru[0,0,:])
 
-                    self.x_predict = result[0,0,:]
+                    zx_predict = result[0,0,:]
+                    x_predict = self.rx.eval(session=self.sess, feed_dict={ self.zx : np.reshape(zx_predict, [1,1,self.size_zx]) })
+
+                    pub_msg = Float32MultiArray(data=x_predict[0,0,:])
+                    self.pubPredict.publish(pub_msg)
 
                 time.sleep(0.001)
     
@@ -392,8 +417,8 @@ class RosTF():
             if args.ros == False:
                 while not self.coord.should_stop():
 
-                    self.emgData = self.sess.run( self.get_data_emg )
-                    self.stateData = self.sess.run( self.get_data_state )
+                    self.emgData = self.sess.run( self.get_data_emg )[0]
+                    self.stateData = self.sess.run( self.get_data_state )[0]
 
                     self.emgSampled = True
                     self.stateSampled = True
@@ -439,6 +464,7 @@ class RosTF():
         self.coord.register_thread( threads[1] )
         self.coord.register_thread( threads[2] )
         self.coord.register_thread( threads[3] )
+       # self.coord.register_thread( threads[4] )
 
         # Using ROS : get data from ros messages 
         if args.ros == True :
@@ -497,9 +523,9 @@ if __name__ == '__main__':
     
     parser.add_argument(
             '-ros',
-            type=bool,
-            default=True,
-            help="(BOOL) Use ros if it is True(default)"
+            type=int,
+            default=1,
+            help="(BOOL) Use ros if it is 1(default)"
     )
 
     parser.add_argument(
@@ -518,16 +544,16 @@ if __name__ == '__main__':
 
     parser.add_argument(
             '-load',
-            type=bool,
+            type=int,
             default=False,
-            help="(BOOL) Load model( default : False )"
+            help="(BOOL) Load model( default : 0 )"
             )
 
     parser.add_argument(
             '-save',
-            type=bool,
+            type=int,
             default=False,
-            help="(BOOL) Save model( default : False )"
+            help="(BOOL) Save model( default : 0 )"
             )
 
     args, unparsed = parser.parse_known_args()

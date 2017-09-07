@@ -1,2 +1,2 @@
-model_checkpoint_path: "model_srnn.ckpt"
-all_model_checkpoint_paths: "model_srnn.ckpt"
+model_checkpoint_path: "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
+all_model_checkpoint_paths: "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"

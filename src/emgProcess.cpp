@@ -113,8 +113,8 @@ int main(int argc, char **argv)
 						else if( tempAct < 0 )
 							tempAct = 0;
 
-						act[i] = muscle.get_next_activation( act[i] , tempAct, 0.002);
-						resData[i] = (float)(rmsFilter_update(i,act[i]*100));
+						act[i] = muscle.get_next_activation( act[i] , tempAct, 0.004);
+						resData[i] = (float)(rmsFilter_update(i,act[i]));
 
 						// For mav filter test
 //						mavData[i] = (int8_t)(rmsFilter_update(i,tempAct*100));

@@ -97,8 +97,6 @@ int main(int argc, char **argv)
 							temp = 1;
 						else if( temp < 0 )
 							temp = 0;
-
-						temp *= 100;
 					
 						resData[i+DATA_SIZE] = ( temp - resData[i] ) / DeltaT; // Velocity
 						resData[i] = temp;	// Position
