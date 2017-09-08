@@ -15,13 +15,14 @@ class DRNNCell(RNNCell):
      the given variables, an error is raised.
   """
 
-  def __init__(self, num_output, num_units, activation=None, reuse=None, keep_prob=1.0):
+  def __init__(self, num_output, num_units, activation=nn.tanh, output_activation=None, reuse=None, keep_prob=1.0):
     super(DRNNCell, self).__init__(_reuse=reuse)
     self._num_layers = len(num_units)
     self._num_units = num_units
     self._num_output = num_output
-    self._activation = activation or math_ops.tanh
+    self._activation = activation
     self._keep_prob = keep_prob
+    self._output_activation = output_activation
 
   @property
   def state_size(self):
@@ -45,7 +46,7 @@ class DRNNCell(RNNCell):
         hidden.append( layers.fully_connected(hidden[l-1], self._num_units[l], activation_fn=self._activation, scope=scope_name) )
 
     scope_name = "Layer{0}".format(self._num_layers+1)
-    output = layers.fully_connected(hidden[-1], self._num_output, activation_fn=None, scope=scope_name)
+    output = layers.fully_connected(hidden[-1], self._num_output, activation_fn=self._output_activation, scope=scope_name)
     output_dropout = nn.dropout(output, keep_prob=self._keep_prob)
 
     return output, output

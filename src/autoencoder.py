@@ -8,7 +8,7 @@ import rospy
 from std_msgs.msg import Float32MultiArray
 
 
-def Autoencoder(x, layer=[], act=tf.sigmoid, keep_prob=1.0, l2_reg=0.001):
+def Autoencoder(x, layer=[], act=tf.sigmoid, embed_act=tf.nn.sigmoid, output_act=tf.nn.sigmoid, keep_prob=1.0, l2_reg=0.001):
     # layer[0] : input layer
     # x : input vector
 
@@ -21,13 +21,15 @@ def Autoencoder(x, layer=[], act=tf.sigmoid, keep_prob=1.0, l2_reg=0.001):
     idx = 0
     
     with tf.variable_scope("encoder"):
+        # Nonlinear mapping layers
         for i in range(1,layer_num-1):
             model.append( tf.contrib.layers.fully_connected(model[idx], layer[i], activation_fn=act, 
                                                                                   scope="layer{0}".format(i),
                                                                                   weights_regularizer = tf.contrib.layers.l2_regularizer(l2_reg)) )
             idx = idx+1
         
-        model.append( tf.contrib.layers.fully_connected(model[idx], layer[layer_num-1], activation_fn=tf.nn.sigmoid, 
+        # Embeding(Coding) layer
+        model.append( tf.contrib.layers.fully_connected(model[idx], layer[layer_num-1], activation_fn=embed_act, 
                                                                               scope="layer{0}".format(layer_num-1),
                                                                               weights_regularizer = tf.contrib.layers.l2_regularizer(l2_reg)) )
 
@@ -35,13 +37,15 @@ def Autoencoder(x, layer=[], act=tf.sigmoid, keep_prob=1.0, l2_reg=0.001):
 
     
     with tf.variable_scope("decoder"):
+        # Nonlinear mapping layers
         for i in range(0,layer2_num-1):
             model.append( tf.contrib.layers.fully_connected(model[idx], layer2[i], activation_fn=act, 
                                                                                    scope="layer{0}".format(i+layer_num),
                                                                                    weights_regularizer = tf.contrib.layers.l2_regularizer(l2_reg)) )
             idx = idx+1
         
-        model.append( tf.contrib.layers.fully_connected(model[idx], layer2[layer2_num-1], activation_fn=tf.nn.sigmoid, 
+        # Output(Reconstruction) layer
+        model.append( tf.contrib.layers.fully_connected(model[idx], layer2[layer2_num-1], activation_fn=output_act, 
                                                                                           scope="layer{0}".format(layer2_num+layer_num-1),
                                                                                           weights_regularizer = tf.contrib.layers.l2_regularizer(l2_reg)) )
 

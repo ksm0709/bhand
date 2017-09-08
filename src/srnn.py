@@ -24,6 +24,14 @@ MODE_TRAIN_AE = 2
 MODE_TRAIN_DRNN = 3
 MODE_SAVE_DATA = 4
 
+SAVE_ALL = 1
+SAVE_AE = 2
+SAVE_DRNN = 3
+
+LOAD_ALL = 1
+LOAD_AE = 2
+LOAD_DRNN = 3
+
 ADAM_OPTIMIZER = 0
 GD_OPTIMIZER = 1
 ADAGRAD_OPTIMIZER = 2
@@ -32,26 +40,30 @@ ADAGRAD_OPTIMIZER = 2
 def kl_divergence(p, q):
     return p*tf.log(p/q) + (1-p)*tf.log((1-p)/(1-q))
 
-def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None,add_loss=0):
+def set_optimizer(y_real,y_out,rate,optimizer=ADAM_OPTIMIZER,scope=None,add_loss=None):
 
     optimizer_dict = { ADAM_OPTIMIZER : tf.train.AdamOptimizer(rate),
                        GD_OPTIMIZER : tf.train.GradientDescentOptimizer(rate),
                        ADAGRAD_OPTIMIZER : tf.train.AdagradOptimizer(rate)}
 
-    mse_loss = tf.reduce_mean(tf.square(y_real - y_out))
-    cross_entropy_loss = tf.reduce_sum( -y_real*tf.log(y_out))
-    reg_loss = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,scope=scope)
+    mse_loss = 10000*tf.reduce_mean(tf.square(y_real - y_out))
+    reg_loss = 10*tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES,scope=scope)
 
-    if add_loss == 0:
-        loss = tf.add_n(10000*[mse_loss] + reg_loss)
+    if add_loss == None:
+        loss = tf.add_n([mse_loss] + reg_loss)
+
+        optimizer_op = optimizer_dict[optimizer]
+        train_op = optimizer_op.minimize(loss) 
+
+        return train_op, [loss,mse_loss,tf.reduce_sum(reg_loss)]
+
     else:
-        loss = tf.add_n(10000*[mse_loss] + reg_loss + [add_loss])
+        loss = tf.add_n([mse_loss] + reg_loss + [add_loss])
 
+        optimizer_op = optimizer_dict[optimizer]
+        train_op = optimizer_op.minimize(loss) 
 
-    optimizer_op = optimizer_dict[optimizer]
-    train_op = optimizer_op.minimize(loss) 
-
-    return train_op, loss
+        return train_op, [loss,mse_loss,tf.reduce_sum(reg_loss),add_loss]
 
 class RosTF():
     def __init__(self):
@@ -68,11 +80,11 @@ class RosTF():
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 10
+        self.batch_size = 50
         self.learning_rate = 0.01
         self.seq_length = 1
-        self.sparsity_target = 0.3
-        self.sparsity_weight = 0.2
+        self.sparsity_target = 0.2
+        self.sparsity_weight = 10
             
         ###ROS Init
         self.subEmg = rospy.Subscriber('/actEMG',
@@ -125,7 +137,10 @@ class RosTF():
                     zu_mean = tf.reduce_mean(self.zu, axis=0)
                     sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zu_mean))
                     self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u", add_loss=sparsity_loss)
-                    tf.summary.scalar( 'ae_u_loss' , self.loss_zu )
+                    tf.summary.scalar( 'ae_u_loss' , self.loss_zu[0] )
+                    tf.summary.scalar( 'ae_u_loss_mse', self.loss_zu[1])
+                    tf.summary.scalar( 'ae_u_loss_reg', self.loss_zu[2])
+                    tf.summary.scalar( 'ae_u_loss_sparsity', self.loss_zu[3])
 
                 #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
@@ -135,15 +150,20 @@ class RosTF():
                     zx_mean = tf.reduce_mean(self.zx, axis=0)
                     sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zx_mean))
                     self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x", add_loss=sparsity_loss)
-                    tf.summary.scalar( 'ae_x_loss' , self.loss_zx )
+                    tf.summary.scalar( 'ae_x_loss' , self.loss_zx[0] )
+                    tf.summary.scalar( 'ae_x_loss_mse', self.loss_zx[1])
+                    tf.summary.scalar( 'ae_x_loss_reg', self.loss_zx[2])
+                    tf.summary.scalar( 'ae_x_loss_sparsity', self.loss_zx[3])
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[20], activation=tf.nn.elu, keep_prob=1.0) 
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=1.0) 
                     self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
-                    tf.summary.scalar( 'drnn_loss' , self.loss_drnn )
+                    tf.summary.scalar( 'drnn_loss' , self.loss_drnn[0] )
+                    tf.summary.scalar( 'drnn_loss_mse', self.loss_drnn[1])
+                    tf.summary.scalar( 'drnn_loss_reg', self.loss_drnn[2])
 
                 # Dict of train functions 
                 self.train_func = {
@@ -157,14 +177,24 @@ class RosTF():
                 self.sess.run(self.init)
                 
                 # Saver / Load Model ######################################### 
-                self.model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_srnn.ckpt"
-                self.saver_on = args.save  
-                self.loader_on = args.load 
+                self.ae_x_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_AEx.ckpt"
+                self.ae_u_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_AEu.ckpt"
+                self.drnn_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_DRNN.ckpt"
                 
-                self.saver = tf.train.Saver()
+                self.ae_x_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="AE_x"))
+                self.ae_u_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="AE_u"))
+                self.drnn_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="DRNN"))
 
-                if self.loader_on == True:
-                    self.saver.restore(self.sess,self.model_dir)
+                if args.load == LOAD_ALL :
+                    self.ae_x_saver.restore(self.sess,self.ae_x_model_dir)
+                    self.ae_u_saver.restore(self.sess,self.ae_u_model_dir)
+                    self.drnn_saver.restore(self.sess,self.drnn_model_dir)
+                elif args.load == LOAD_AE:
+                    self.ae_x_saver.restore(self.sess,self.ae_x_model_dir)
+                    self.ae_u_saver.restore(self.sess,self.ae_u_model_dir)
+                elif args.load == LOAD_DRNN:
+                    self.drnn_saver.restore(self.sess,self.drnn_model_dir)
+
                ############################################################### 
 
                 #Queue & Coordinator
@@ -183,8 +213,8 @@ class RosTF():
                 self.que_size = self.que.size()
 
                 #File input pipeline
-                filename_queue_emg = tf.train.string_input_producer(["tf_data/emg_state/1_emg.csv"],shuffle=False, name='filename_queue_emg')
-                filename_queue_state = tf.train.string_input_producer(["tf_data/emg_state/1_state.csv"],shuffle=False, name='filename_queue_state')
+                filename_queue_emg = tf.train.string_input_producer(["tf_data/emg_state/1_emg.csv","tf_data/emg_state/2_emg.csv"],shuffle=False, name='filename_queue_emg')
+                filename_queue_state = tf.train.string_input_producer(["tf_data/emg_state/1_state.csv","tf_data/emg_state/2_state.csv"],shuffle=False, name='filename_queue_state')
 
                 reader_emg = tf.TextLineReader()
                 reader_state = tf.TextLineReader()
@@ -221,14 +251,7 @@ class RosTF():
                                                          feed_dict=feed_dict)
                                                             
         if step % 10 == 0:
-           print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {3}".format(step,loss_zx, loss_zu, loss_drnn)
-
-           summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
-           self.summary_writer.add_summary( summary_str, step )
-           self.summary_writer.flush()
-            
-           if step%100 == 0 and self.saver_on == True:
-               self.saver.save(self.sess, self.model_dir)
+           print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {3}".format(step,loss_zx[0], loss_zu[0], loss_drnn[0])
 
         return 0
 
@@ -239,15 +262,7 @@ class RosTF():
                                              self.loss_zu], feed_dict=feed_dict)
 
         if step % 10 == 0 :
-
-            print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx, loss_zu)
-
-            summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
-            self.summary_writer.add_summary( summary_str, step )
-            self.summary_writer.flush()
-            
-            if step%100 == 0 and self.saver_on == True:
-                self.saver.save(self.sess, self.model_dir)
+            print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx[0], loss_zu[0])
 
         return 0
     def func_train_drnn(self,step,feed_dict):
@@ -256,14 +271,9 @@ class RosTF():
 
         if step % 10 == 0 :
 
-            print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn)
+            print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn[0])
 
-            summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
-            self.summary_writer.add_summary( summary_str, step )
-            self.summary_writer.flush()
-            
-            if step%100 == 0 and self.saver_on == True:
-                self.saver.save(self.sess, self.model_dir)
+           
 
         return 0
 
@@ -292,7 +302,7 @@ class RosTF():
                     self.emgSampled = False
                     self.stateSampled = False
 
-                    if len(u_buf) == self.seq_length :
+                    if len(u_buf) == self.seq_length+1 :
                         break
 
             # Enqueue
@@ -332,7 +342,7 @@ class RosTF():
 
                     u, x, x0 = self.sess.run( self.deque_op )
 
-                    # x0 reshape cosidering sequence length
+                    # x0 reshape cosidering sequence length dim
                     x0 = np.reshape(x0, [self.batch_size,1,self.size_x])
 
                     # Encoding
@@ -348,13 +358,31 @@ class RosTF():
                                   self.zu_ph : zu, 
                                   self.zx_ph : zx, 
                                   self.initial_state : zx0  } 
-
-                    step = step+1
-
-                    # Training & Print & Saving model
+                    
+                    # Training
                     self.train_func[args.mode](step,feed_dict)
 
-                time.sleep(0.001)
+                    # Summary & Save
+                    if step%10 == 0:
+                        summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
+                        self.summary_writer.add_summary( summary_str, step )
+                        self.summary_writer.flush()
+            
+                        if step%1000 == 0 :
+
+                            if args.save == SAVE_ALL :
+                                self.ae_x_saver.save(self.sess,self.ae_x_model_dir)
+                                self.ae_u_saver.save(self.sess,self.ae_u_model_dir)
+                                self.drnn_saver.save(self.sess,self.drnn_model_dir)
+                            elif args.save == SAVE_AE:
+                                self.ae_x_saver.save(self.sess,self.ae_x_model_dir)
+                                self.ae_u_saver.save(self.sess,self.ae_u_model_dir)
+                            elif args.save == SAVE_DRNN:
+                                self.drnn_saver.save(self.sess,self.drnn_model_dir)
+                    
+                    step = step+1
+
+                    time.sleep(0.001)
            
 
     def predict_thread(self): 
@@ -403,10 +431,11 @@ class RosTF():
                     zx_predict = result[0,0,:]
                     x_predict = self.rx.eval(session=self.sess, feed_dict={ self.zx : np.reshape(zx_predict, [1,1,self.size_zx]) })
 
-                    pub_msg = Float32MultiArray(data=x_predict[0,0,:])
-                    self.pubPredict.publish(pub_msg)
-
-                time.sleep(0.001)
+                    if args.ros == 1 :
+                        pub_msg = Float32MultiArray(data=x_predict[0,0,:])
+                        self.pubPredict.publish(pub_msg)
+                
+                    time.sleep(0.001)
     
     def file_process_thread(self):
         print "file_process_thread : start"
@@ -545,15 +574,15 @@ if __name__ == '__main__':
     parser.add_argument(
             '-load',
             type=int,
-            default=False,
-            help="(BOOL) Load model( default : 0 )"
+            default=0,
+            help="(INT) Load model( Do not Load : 0(defalut), Load all : 1, Load AE: 2, Load DRNN: 3 )"
             )
 
     parser.add_argument(
             '-save',
             type=int,
-            default=False,
-            help="(BOOL) Save model( default : 0 )"
+            default=0,
+            help="(INT) Save model( Do not Save : 0(default), Save all : 1, Save AE: 2, Save DRNN: 3 )"
             )
 
     args, unparsed = parser.parse_known_args()
