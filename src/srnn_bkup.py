@@ -74,13 +74,15 @@ class RosTF():
         self.filenameHeader = args.filename
 
         ###Network Vars(Hyper Parameters)
+        self.size_zx = 3
+        self.size_zu = 5
         self.size_x = 5
         self.size_u = 8
-        self.layer_in = self.size_x + self.size_u
-        self.layer_out = self.size_x
+        self.layer_in = self.size_zx + self.size_zu
+        self.layer_out = self.size_zx
         self.batch_size = 20
-        self.learning_rate = 0.001
-        self.seq_length = 5
+        self.learning_rate = 0.01
+        self.seq_length = 100
         self.sparsity_target = 0.3
         self.sparsity_weight = 10
             
@@ -117,35 +119,88 @@ class RosTF():
             with self.sess.as_default():
           
                 #Placeholders
+                self.zu_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zu]) # Embeded U
+                self.zx_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_zx]) # Embeded X
                 self.u_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_u])   # U (emg)
                 self.x_ph = tf.placeholder(tf.float32, shape=[None, None, self.size_x])   # X (state)
                 self.uEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_u]) 
                 self.xEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_x])
                 self.x0Enque_ph = tf.placeholder(tf.float32, shape=[self.size_x])
-                self.initial_state = tf.placeholder(tf.float32, shape=[None,self.size_x])
-                self.keep_prob_ph = tf.placeholder(tf.float32)
+                self.initial_state = tf.placeholder(tf.float32, shape=[None,self.size_zx])
+                self.drnn_dropout = tf.placeholder(tf.float32)
+
+                #Autoencoder for EMG
+                with tf.variable_scope("AE_u"):
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, 
+                                                                                                   keep_prob=1.0,
+                                                                                                   l2_reg=0.01)
+
+                    zu_mean = tf.reduce_mean(self.zu, axis=0)
+                    sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zu_mean))
+                    self.train_zu, self.loss_zu = set_optimizer(self.u_ph, self.ru, self.learning_rate, ADAM_OPTIMIZER, scope="AE_u", add_loss=sparsity_loss)
+                    tf.summary.scalar( 'ae_u_loss' , self.loss_zu[0] )
+                    tf.summary.scalar( 'ae_u_loss_mse', self.loss_zu[1])
+                    tf.summary.scalar( 'ae_u_loss_reg', self.loss_zu[2])
+                    tf.summary.scalar( 'ae_u_loss_sparsity', self.loss_zu[3])
+
+                    #tf.summary.image('u_in', tf.reshape(self.u_ph,[1,1,self.size_u,1]),1)
+                    # tf.summary.image('ae_u_zu',tf.reshape(self.zu,[1,1,self.size_zu,1]),1)
+                    # tf.summary.image('u_out', tf.reshape(self.ru, [1,1,self.size_u,1]),1)
+
+                #Autoencoder for Glove
+                with tf.variable_scope("AE_x"):
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, 
+                                                                                                   keep_prob=1.0,
+                                                                                                   l2_reg=0.01)
+                    zx_mean = tf.reduce_mean(self.zx, axis=0)
+                    sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zx_mean))
+                    self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x", add_loss=sparsity_loss)
+                    tf.summary.scalar( 'ae_x_loss' , self.loss_zx[0] )
+                    tf.summary.scalar( 'ae_x_loss_mse', self.loss_zx[1])
+                    tf.summary.scalar( 'ae_x_loss_reg', self.loss_zx[2])
+                    tf.summary.scalar( 'ae_x_loss_sparsity', self.loss_zx[3])
+
+                    #tf.summary.image('x_in',tf.reshape(self.x_ph,[1,1,self.size_x,1]),1)
+                    # tf.summary.image('ae_x_zx',tf.reshape(self.zx,[1,1,self.size_zx,1]),1)
+                    # tf.summary.image('x_out',tf.reshape(self.rx, [1,1,self.size_x,1]),1)
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30, 30, 30, 30, 30, 30], activation=tf.nn.tanh, output_activation=tf.nn.tanh, keep_prob=self.keep_prob_ph) 
-                    self.x_next, _states = tf.nn.dynamic_rnn( self.cell, self.u_ph, initial_state=self.initial_state, dtype=tf.float32 )
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30,40,30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
+                    self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
-                    self.train_drnn, self.loss_drnn = set_optimizer(self.x_ph, self.x_next, self.learning_rate,scope="DRNN")
+                    self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
                     tf.summary.scalar( 'drnn_loss' , self.loss_drnn[0] )
                     tf.summary.scalar( 'drnn_loss_mse', self.loss_drnn[1])
                     tf.summary.scalar( 'drnn_loss_reg', self.loss_drnn[2])
+
+                # Dict of train functions 
+                self.train_func = {
+                    MODE_TRAIN_AE : self.func_train_ae,
+                    MODE_TRAIN_DRNN : self.func_train_drnn,
+                    MODE_TRAIN_ALL : self.func_train_all,
+                    }
 
                 #Init Variable
                 self.init = tf.global_variables_initializer()
                 self.sess.run(self.init)
                 
                 # Saver / Load Model ######################################### 
+                self.ae_x_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_AEx.ckpt"
+                self.ae_u_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_AEu.ckpt"
                 self.drnn_model_dir = "/home/taeho/catkin_ws/src/bhand/src/tf_model/model_DRNN.ckpt"
                 
+                self.ae_x_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="AE_x"))
+                self.ae_u_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="AE_u"))
                 self.drnn_saver = tf.train.Saver(var_list=tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="DRNN"))
 
                 if args.load == LOAD_ALL :
+                    self.ae_x_saver.restore(self.sess,self.ae_x_model_dir)
+                    self.ae_u_saver.restore(self.sess,self.ae_u_model_dir)
                     self.drnn_saver.restore(self.sess,self.drnn_model_dir)
+                elif args.load == LOAD_AE:
+                    self.ae_x_saver.restore(self.sess,self.ae_x_model_dir)
+                    self.ae_u_saver.restore(self.sess,self.ae_u_model_dir)
                 elif args.load == LOAD_DRNN:
                     self.drnn_saver.restore(self.sess,self.drnn_model_dir)
 
@@ -193,6 +248,44 @@ class RosTF():
 
                 print "-------------------------------------------------"
     
+    
+
+    def func_train_all(self,step,feed_dict):
+        _,_,_,loss_zx,loss_zu,loss_drnn = self.sess.run([self.train_zx, 
+                                                         self.train_zu, 
+                                                         self.train_drnn, 
+                                                         self.loss_zx, 
+                                                         self.loss_zu, 
+                                                         self.loss_drnn], 
+                                                         feed_dict=feed_dict)
+                                                            
+        if step % 10 == 0:
+           print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {:5.5f}".format(step,loss_zx[0], loss_zu[0], loss_drnn[0])
+
+        return 0
+
+    def func_train_ae(self,step,feed_dict):
+        _,_,loss_zx,loss_zu = self.sess.run([self.train_zx, 
+                                             self.train_zu, 
+                                             self.loss_zx, 
+                                             self.loss_zu], feed_dict=feed_dict)
+
+        if step % 10 == 0 :
+            print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx[0], loss_zu[0])
+
+        return 0
+    def func_train_drnn(self,step,feed_dict):
+
+        _,loss_drnn = self.sess.run([self.train_drnn, self.loss_drnn], feed_dict=feed_dict)
+
+        if step % 10 == 0 :
+
+            print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn[0])
+
+           
+
+        return 0
+
     def callbackEmg(self, msg): 
         self.emgData = msg.data
         self.emgSampled = True
@@ -258,21 +351,30 @@ class RosTF():
 
                     u, x, x0 = self.sess.run( self.deque_op )
 
-                    x0 = np.reshape(x0, [self.batch_size,self.size_x])
+                    # x0 reshape cosidering sequence length dim
+                    x0 = np.reshape(x0, [self.batch_size,1,self.size_x])
 
+                    # Encoding
+                    zu = self.sess.run( self.zu, feed_dict={ self.u_ph : u })
+                    zx = self.sess.run( self.zx , feed_dict={ self.x_ph : x })
+                    zx0 = self.sess.run( self.zx , feed_dict={ self.x_ph : x0 })
+
+                    # zx0 reshape removing sequence length dim
+                    zx0 = np.reshape(zx0, [self.batch_size,self.size_zx])
+                  
                     feed_dict = { self.u_ph : u,
                                   self.x_ph : x,
-                                  self.initial_state : x0,
-                                  self.keep_prob_ph : 0.8
+                                  self.zu_ph : zu, 
+                                  self.zx_ph : zx, 
+                                  self.initial_state : zx0,
+                                  self.drnn_dropout : 0.8
                                   } 
                     
                     # Training
-                    _,loss_drnn = self.sess.run([self.train_drnn, self.loss_drnn], feed_dict=feed_dict)
+                    self.train_func[args.mode](step,feed_dict)
 
-                    if step % 10 == 0 :
-
-                        print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn[0])
-
+                    # Summary & Save
+                    if step%10 == 0:
                         summary_str = self.sess.run( self.summary, feed_dict = feed_dict )
                         self.summary_writer.add_summary( summary_str, step )
                         self.summary_writer.flush()
@@ -280,7 +382,12 @@ class RosTF():
                         if step%1000 == 0 :
 
                             if args.save == SAVE_ALL :
+                                self.ae_x_saver.save(self.sess,self.ae_x_model_dir)
+                                self.ae_u_saver.save(self.sess,self.ae_u_model_dir)
                                 self.drnn_saver.save(self.sess,self.drnn_model_dir)
+                            elif args.save == SAVE_AE:
+                                self.ae_x_saver.save(self.sess,self.ae_x_model_dir)
+                                self.ae_u_saver.save(self.sess,self.ae_u_model_dir)
                             elif args.save == SAVE_DRNN:
                                 self.drnn_saver.save(self.sess,self.drnn_model_dir)
                     
@@ -294,6 +401,8 @@ class RosTF():
 
         with self.coord.stop_on_exception():
 
+            fZx = open("Zx.csv",'w')
+            fZu = open("Zu.csv",'w')
             fRx = open("Rx.csv",'w')
 
             flag = False
@@ -309,13 +418,14 @@ class RosTF():
 
                     if flag == False :
                         x0 = np.array( [[self.stateData]] )
+                        zx0 = self.sess.run( self.zx , feed_dict={ self.x_ph : x0 })
+
                         flag = True
                     else :
-                        x_predict_ = result
+                        x_predict_ = self.rx.eval(session=self.sess, feed_dict={ self.zx : result })
                         x_predict = np.reshape(x_predict_, [self.size_x])
                         x_real = np.array(self.stateData)
 
-                        x0 = x_predict_
                         err_x = np.sum(np.absolute(x_predict - x_real))
 
                         if args.ros == 1 :
@@ -323,22 +433,30 @@ class RosTF():
                             self.pubPredict.publish(pub_msg)
                         
                         print "State Err : {:.3f}".format(err_x) 
-                       
-                        fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x_real[0],x_real[1],x_real[2],x_real[3],x_real[4],
-                                                                                               x_predict[0],x_predict[1],x_predict[2],x_predict[3],x_predict[4]))
-
+                    
                     u = np.array( [[self.emgData]] )
+                    zu = self.sess.run( self.zu, feed_dict={ self.u_ph : u })
+
+                    feed_dict = { self.zu_ph : zu, 
+                                  self.initial_state : np.reshape(zx0, [1,self.size_zx]),
+                                  self.drnn_dropout : 1.0
+                                   } 
+
+                    result = self.sess.run(self.zx_next, feed_dict=feed_dict)
+                    zx0 = result
 
 
-                    feed_dict = { self.u_ph : u, 
-                                  self.initial_state : np.reshape(x0, [1,self.size_x]),
-                                  self.keep_prob_ph : 1.0  } 
-
-                    result = self.sess.run(self.x_next, feed_dict=feed_dict)
                     
                                     
+                    fZx.write("{:.3f},{:.3f},{:.3f}\r\n".format(zx0[0,0,0],zx0[0,0,1],zx0[0,0,2]))
+                    fZu.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(zu[0,0,0],zu[0,0,1],zu[0,0,2],zu[0,0,3],zu[0,0,4]))
+                    fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x_real[0],x_real[1],x_real[2],x_real[3],x_real[4],
+                                                                                               x_predict[0],x_predict[1],x_predict[2],x_predict[3],x_predict[4]))
+
                 time.sleep(0.001)
 
+            fZx.close()
+            fZu.close()
             fRx.close()
     
     def file_process_thread(self):
