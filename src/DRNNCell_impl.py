@@ -47,7 +47,7 @@ class DRNNCell(RNNCell):
 
     scope_name = "Layer{0}".format(self._num_layers+1)
     output = layers.fully_connected(hidden[-1], self._num_output, activation_fn=self._output_activation, scope=scope_name)
-    output_dropout = nn.dropout(output, keep_prob=self._keep_prob) + state
+    output_dropout = nn.dropout(output, keep_prob=self._keep_prob)
 
     return output_dropout, output_dropout
 

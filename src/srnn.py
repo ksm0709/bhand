@@ -80,7 +80,7 @@ class RosTF():
         self.layer_out = self.size_x
         self.batch_size = 20
         self.learning_rate = 0.001
-        self.seq_length = 5
+        self.seq_length = 10
         self.sparsity_target = 0.3
         self.sparsity_weight = 10
             
@@ -153,12 +153,12 @@ class RosTF():
 
                 #Queue & Coordinator
                 self.coord = tf.train.Coordinator()
-                #self.que = tf.FIFOQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]], # u, x, x0
-                #                        dtypes=[tf.float32, tf.float32, tf.float32],
-                #                        capacity=1000)
-                self.que = tf.RandomShuffleQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]],
-                                                 dtypes=[tf.float32, tf.float32, tf.float32],
-                                                 capacity=3000, min_after_dequeue=2000, seed=2121)
+                self.que = tf.FIFOQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]], # u, x, x0
+                                        dtypes=[tf.float32, tf.float32, tf.float32],
+                                        capacity=1000, min_after_dequeue=500)
+               # self.que = tf.RandomShuffleQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]],
+               #                                  dtypes=[tf.float32, tf.float32, tf.float32],
+               #                                  capacity=3000, min_after_dequeue=2000, seed=2121)
 
 
                 self.queClose_op = self.que.close(cancel_pending_enqueues=True)
@@ -296,47 +296,55 @@ class RosTF():
 
             fRx = open("Rx.csv",'w')
 
-            flag = False
             step = 0
-            x_predict = np.zeros(self.size_x)
-            x_real = np.zeros(self.size_x)
-            x0 = np.zeros([1,1,self.size_x])
-            u = np.zeros([1,1,self.size_u])
+            x_buf = []
+            u_buf = []
+
             while not self.coord.should_stop():
                 if self.stateSampled == True and self.emgSampled == True:
                     self.stateSampled = False
                     self.emgSampled = False
 
-                    if flag == False :
-                        x0 = np.array( [[self.stateData]] )
-                        flag = True
-                    else :
-                        x_predict_ = result
-                        x_predict = np.reshape(x_predict_, [self.size_x])
-                        x_real = np.array(self.stateData)
+                    x_buf.append(self.stateData) 
+                    u_buf.append(self.emgData)
 
-                        x0 = x_predict_
-                        err_x = np.sum(np.absolute(x_predict - x_real))
+                    if len(x_buf) > self.seq_length+1 :
+                        x0 = np.array( x_buf[0] )
+                        break
 
-                        if args.ros == 1 :
-                            pub_msg = Float32MultiArray(data=x_predict)
-                            self.pubPredict.publish(pub_msg)
-                        
-                        print "State Err : {:.3f}".format(err_x) 
-                       
-                        fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x_real[0],x_real[1],x_real[2],x_real[3],x_real[4],
-                                                                                               x_predict[0],x_predict[1],x_predict[2],x_predict[3],x_predict[4]))
+            while not self.coord.should_stop():
+                if self.stateSampled == True and self.emgSampled == True:
+                    self.stateSampled = False
+                    self.emgSampled = False
 
-                    u = np.array( [[self.emgData]] )
+                    x_buf.append(self.stateData)
+                    u_buf.append(self.emgData)
 
+                    x = np.array( x_buf[1:self.seq_length+1] )
+                    u = np.array( u_buf[0:self.seq_length] )
 
+                    x_buf.pop(0)
+                    u_buf.pop(0) 
+                    
                     feed_dict = { self.u_ph : u, 
                                   self.initial_state : np.reshape(x0, [1,self.size_x]),
                                   self.keep_prob_ph : 1.0  } 
 
-                    result = self.sess.run(self.x_next, feed_dict=feed_dict)
+                    x_predict_ = self.sess.run(self.x_next, feed_dict=feed_dict)
+                    x_predict = np.reshape( x_predict_, [self.seq_length, self.size_x] )
+                    err_x = np.sum(np.absolute(x_predict[-1,:]-x[-1,:]))
+
+                    x0 = x_predict[0,:]
+                     
+                    if args.ros == 1 :
+                        pub_msg = Float32MultiArray(data=x_predict[-1,:])
+                    self.pubPredict.publish(pub_msg)
                     
-                                    
+                    print "State Err : {:.3f}".format(err_x) 
+                    
+                    fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x_real[0],x_real[1],x_real[2],x_real[3],x_real[4],
+                                                                                               x_predict[0],x_predict[1],x_predict[2],x_predict[3],x_predict[4]))
+
                 time.sleep(0.001)
 
             fRx.close()

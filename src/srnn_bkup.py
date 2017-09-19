@@ -80,7 +80,7 @@ class RosTF():
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 20
+        self.batch_size = 50
         self.learning_rate = 0.01
         self.seq_length = 100
         self.sparsity_target = 0.3
@@ -167,7 +167,9 @@ class RosTF():
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
                     self.cell = DRNNCell(num_output=self.layer_out, num_units=[30,40,30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
-                    self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
+                    self.lstm_cell = tf.contrib.rnn.BasicLSTMCell(num_units=self.layer_out)
+                    self.lstm_init = tf.contrib.rnn.LSTMStateTuple(self.initial_state,self.initial_state)
+                    self.zx_next, _states = tf.nn.dynamic_rnn( self.lstm_cell, self.zu_ph, initial_state= self.lstm_init, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
                     tf.summary.scalar( 'drnn_loss' , self.loss_drnn[0] )
@@ -209,8 +211,8 @@ class RosTF():
                 #Queue & Coordinator
                 self.coord = tf.train.Coordinator()
                 #self.que = tf.FIFOQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]], # u, x, x0
-                #                        dtypes=[tf.float32, tf.float32, tf.float32],
-                #                        capacity=1000)
+                #                       dtypes=[tf.float32, tf.float32, tf.float32],
+                #                       capacity=1000)
                 self.que = tf.RandomShuffleQueue(shapes=[[self.seq_length,self.size_u],[self.seq_length,self.size_x],[self.size_x]],
                                                  dtypes=[tf.float32, tf.float32, tf.float32],
                                                  capacity=3000, min_after_dequeue=2000, seed=2121)
@@ -401,64 +403,67 @@ class RosTF():
 
         with self.coord.stop_on_exception():
 
-            fZx = open("Zx.csv",'w')
-            fZu = open("Zu.csv",'w')
             fRx = open("Rx.csv",'w')
 
-            flag = False
             step = 0
-            x_predict = np.zeros(self.size_x)
-            x_real = np.zeros(self.size_x)
-            x0 = np.zeros([1,1,self.size_x])
-            u = np.zeros([1,1,self.size_u])
+            x_buf = []
+            u_buf = []
+
             while not self.coord.should_stop():
                 if self.stateSampled == True and self.emgSampled == True:
                     self.stateSampled = False
                     self.emgSampled = False
 
-                    if flag == False :
-                        x0 = np.array( [[self.stateData]] )
-                        zx0 = self.sess.run( self.zx , feed_dict={ self.x_ph : x0 })
+                    x_buf.append(self.stateData) 
+                    u_buf.append(self.emgData)
 
-                        flag = True
-                    else :
-                        x_predict_ = self.rx.eval(session=self.sess, feed_dict={ self.zx : result })
-                        x_predict = np.reshape(x_predict_, [self.size_x])
-                        x_real = np.array(self.stateData)
+                    if len(x_buf) > self.seq_length+1 :
+                        x0 = np.array( x_buf[0] )
+                        break
 
-                        err_x = np.sum(np.absolute(x_predict - x_real))
+            while not self.coord.should_stop():
+                if self.stateSampled == True and self.emgSampled == True:
+                    self.stateSampled = False
+                    self.emgSampled = False
 
-                        if args.ros == 1 :
-                            pub_msg = Float32MultiArray(data=x_predict)
-                            self.pubPredict.publish(pub_msg)
-                        
-                        print "State Err : {:.3f}".format(err_x) 
+                    # Buffering Data
+                    x_buf.append(self.stateData)
+                    u_buf.append(self.emgData)
+
+                    x = np.array( x_buf[1:self.seq_length+1] )
+                    u = np.array( u_buf[0:self.seq_length] )
+
+                    x_buf.pop(0)
+                    u_buf.pop(0) 
+
+                    # Get initial state , input
+                    zu = self.zu.eval(session=self.sess, feed_dict={ self.u_ph : np.reshape(u,[1,self.seq_length,self.size_u])})
+                    zx0 = self.zx.eval(session=self.sess, feed_dict={ self.x_ph : np.reshape(x0,[1,1,self.size_x])})
                     
-                    u = np.array( [[self.emgData]] )
-                    zu = self.sess.run( self.zu, feed_dict={ self.u_ph : u })
-
+                    # Predict & print
                     feed_dict = { self.zu_ph : zu, 
-                                  self.initial_state : np.reshape(zx0, [1,self.size_zx]),
-                                  self.drnn_dropout : 1.0
-                                   } 
+                                  self.initial_state : np.reshape(zx0,[1,self.size_zx]),
+                                  self.drnn_dropout : 1.0  } 
 
-                    result = self.sess.run(self.zx_next, feed_dict=feed_dict)
-                    zx0 = result
+                    zx_predict_ = self.sess.run(self.zx_next, feed_dict=feed_dict)
+                    x_predict_ = self.rx.eval(session=self.sess,feed_dict={self.zx : zx_predict_})
+                    x_predict = np.reshape( x_predict_, [self.seq_length, self.size_x] )
+                    err_x = np.sum(np.absolute(x_predict[-1,:]-x[-1,:]))
 
-
+                    x0 = x_predict[0,:]
+                     
+                    if args.ros == 1 :
+                        pub_msg = Float32MultiArray(data=x_predict[-1,:])
+                        self.pubPredict.publish(pub_msg)
                     
-                                    
-                    fZx.write("{:.3f},{:.3f},{:.3f}\r\n".format(zx0[0,0,0],zx0[0,0,1],zx0[0,0,2]))
-                    fZu.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(zu[0,0,0],zu[0,0,1],zu[0,0,2],zu[0,0,3],zu[0,0,4]))
-                    fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x_real[0],x_real[1],x_real[2],x_real[3],x_real[4],
-                                                                                               x_predict[0],x_predict[1],x_predict[2],x_predict[3],x_predict[4]))
+                    print "State Err : {:.3f}".format(err_x) 
+                    
+                    fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x[-1,0],x[-1,1],x[-1,2],x[-1,3],x[-1,4],
+                                                                                               x_predict[-1,0],x_predict[-1,1],x_predict[-1,2],x_predict[-1,3],x_predict[-1,4]))
 
                 time.sleep(0.001)
 
-            fZx.close()
-            fZu.close()
             fRx.close()
-    
     def file_process_thread(self):
         print "file_process_thread : start"
 
