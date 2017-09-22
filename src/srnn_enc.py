@@ -74,15 +74,15 @@ class RosTF():
         self.filenameHeader = args.filename
 
         ###Network Vars(Hyper Parameters)
-        self.size_zx = 10
-        self.size_zu = 15
+        self.size_zx = 3
+        self.size_zu = 5
         self.size_x = 5
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 100
-        self.learning_rate = 0.0001
-        self.seq_length = 100
+        self.batch_size = 300
+        self.learning_rate = 0.1
+        self.seq_length = 25
         self.sparsity_target = 0.3
         self.sparsity_weight = 10
             
@@ -127,11 +127,11 @@ class RosTF():
                 self.xEnque_ph = tf.placeholder(tf.float32, shape=[None, self.size_x])
                 self.x0Enque_ph = tf.placeholder(tf.float32, shape=[self.size_x])
                 self.initial_state = tf.placeholder(tf.float32, shape=[None,self.size_zx])
-                self.drnn_dropout = tf.placeholder(tf.float32)
+                self.bn_phase = tf.placeholder(tf.bool)
 
                 #Autoencoder for EMG
                 with tf.variable_scope("AE_u"):
-                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu+1,+1),act = tf.nn.elu, 
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, 
                                                                                                    keep_prob=1.0,
                                                                                                    l2_reg=0.000001)
 
@@ -149,7 +149,7 @@ class RosTF():
 
                 #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
-                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx+1,+1),act = tf.nn.elu, 
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, 
                                                                                                    keep_prob=1.0,
                                                                                                    l2_reg=0.000001)
                     zx_mean = tf.reduce_mean(self.zx, axis=0)
@@ -166,7 +166,7 @@ class RosTF():
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30,40,30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[50], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, phase=self.bn_phase) 
                     self.zx_next, _states = tf.nn.dynamic_rnn( self.cell, self.zu_ph, initial_state=self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
@@ -367,7 +367,7 @@ class RosTF():
                                   self.zu_ph : zu, 
                                   self.zx_ph : zx, 
                                   self.initial_state : zx0,
-                                  self.drnn_dropout : 0.8
+                                  self.bn_phase : True
                                   } 
                     
                     # Training
@@ -439,7 +439,7 @@ class RosTF():
 
                     feed_dict = { self.zu_ph : zu, 
                                   self.initial_state : np.reshape(zx0, [1,self.size_zx]),
-                                  self.drnn_dropout : 1.0
+                                  self.bn_phase : False
                                    } 
 
                     result = self.sess.run(self.zx_next, feed_dict=feed_dict)
