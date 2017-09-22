@@ -167,9 +167,9 @@ class RosTF():
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
                     self.cell = DRNNCell(num_output=self.layer_out, num_units=[30,40,30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
-                    self.lstm_cell = tf.contrib.rnn.BasicLSTMCell(num_units=self.layer_out)
+                    self.lstm_cell = tf.contrib.rnn.GRUCell(num_units=self.layer_out)
                     self.lstm_init = tf.contrib.rnn.LSTMStateTuple(self.initial_state,self.initial_state)
-                    self.zx_next, _states = tf.nn.dynamic_rnn( self.lstm_cell, self.zu_ph, initial_state= self.lstm_init, dtype=tf.float32 )
+                    self.zx_next, _states = tf.nn.dynamic_rnn( self.lstm_cell, self.zu_ph, initial_state= self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
                     tf.summary.scalar( 'drnn_loss' , self.loss_drnn[0] )
