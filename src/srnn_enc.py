@@ -74,14 +74,14 @@ class RosTF():
         self.filenameHeader = args.filename
 
         ###Network Vars(Hyper Parameters)
-        self.size_zx = 3
-        self.size_zu = 5
+        self.size_zx = 10
+        self.size_zu = 15
         self.size_x = 5
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 20
-        self.learning_rate = 0.01
+        self.batch_size = 100
+        self.learning_rate = 0.0001
         self.seq_length = 100
         self.sparsity_target = 0.3
         self.sparsity_weight = 10
@@ -131,9 +131,9 @@ class RosTF():
 
                 #Autoencoder for EMG
                 with tf.variable_scope("AE_u"):
-                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu-1,-1),act = tf.nn.elu, 
+                    self.zu, self.ru = Autoencoder(self.u_ph, range(self.size_u,self.size_zu+1,+1),act = tf.nn.elu, 
                                                                                                    keep_prob=1.0,
-                                                                                                   l2_reg=0.01)
+                                                                                                   l2_reg=0.000001)
 
                     zu_mean = tf.reduce_mean(self.zu, axis=0)
                     sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zu_mean))
@@ -149,9 +149,9 @@ class RosTF():
 
                 #Autoencoder for Glove
                 with tf.variable_scope("AE_x"):
-                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx-1,-1),act = tf.nn.elu, 
+                    self.zx, self.rx = Autoencoder(self.x_ph, range(self.size_x,self.size_zx+1,+1),act = tf.nn.elu, 
                                                                                                    keep_prob=1.0,
-                                                                                                   l2_reg=0.01)
+                                                                                                   l2_reg=0.000001)
                     zx_mean = tf.reduce_mean(self.zx, axis=0)
                     sparsity_loss = self.sparsity_weight * tf.reduce_sum(kl_divergence(self.sparsity_target, zx_mean))
                     self.train_zx, self.loss_zx = set_optimizer(self.x_ph, self.rx, self.learning_rate, ADAM_OPTIMIZER, scope="AE_x", add_loss=sparsity_loss)
