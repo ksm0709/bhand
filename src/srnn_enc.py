@@ -80,9 +80,9 @@ class RosTF():
         self.size_u = 8
         self.layer_in = self.size_zx + self.size_zu
         self.layer_out = self.size_zx
-        self.batch_size = 50
+        self.batch_size = 200
         self.learning_rate = 0.01
-        self.seq_length = 100
+        self.seq_length = 30
         self.sparsity_target = 0.3
         self.sparsity_weight = 10
             
@@ -166,10 +166,10 @@ class RosTF():
 
                 #DRNNNetwork
                 with tf.variable_scope("DRNN"):
-                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30,40,30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
-                    self.lstm_cell = tf.contrib.rnn.GRUCell(num_units=self.layer_out)
-                    self.lstm_init = tf.contrib.rnn.LSTMStateTuple(self.initial_state,self.initial_state)
-                    self.zx_next, _states = tf.nn.dynamic_rnn( self.lstm_cell, self.zu_ph, initial_state= self.initial_state, dtype=tf.float32 )
+                    self.cell = DRNNCell(num_output=self.layer_out, num_units=[30], activation=tf.nn.elu, output_activation=tf.nn.sigmoid, keep_prob=self.drnn_dropout) 
+                    self.gru_cell = tf.contrib.rnn.GRUCell(num_units=self.layer_out)
+                    #self.lstm_init = tf.contrib.rnn.LSTMStateTuple(self.initial_state,self.initial_state)
+                    self.zx_next, _states = tf.nn.dynamic_rnn( self.gru_cell, self.zu_ph, initial_state= self.initial_state, dtype=tf.float32 )
 
                     self.train_drnn, self.loss_drnn = set_optimizer(self.zx_ph, self.zx_next, self.learning_rate, scope="DRNN")
                     tf.summary.scalar( 'drnn_loss' , self.loss_drnn[0] )
@@ -261,8 +261,7 @@ class RosTF():
                                                          self.loss_drnn], 
                                                          feed_dict=feed_dict)
                                                             
-        if step % 10 == 0:
-           print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {:5.5f}".format(step,loss_zx[0], loss_zu[0], loss_drnn[0])
+        print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}    loss_drnn : {:5.5f}".format(step,loss_zx[0], loss_zu[0], loss_drnn[0])
 
         return 0
 
@@ -272,17 +271,14 @@ class RosTF():
                                              self.loss_zx, 
                                              self.loss_zu], feed_dict=feed_dict)
 
-        if step % 10 == 0 :
-            print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx[0], loss_zu[0])
+        print "step : {:d}   loss_AE_x : {:5.5f}    loss_AE_u : {:5.5f}".format(step,loss_zx[0], loss_zu[0])
 
         return 0
     def func_train_drnn(self,step,feed_dict):
 
         _,loss_drnn = self.sess.run([self.train_drnn, self.loss_drnn], feed_dict=feed_dict)
 
-        if step % 10 == 0 :
-
-            print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn[0])
+        print "step : {:d}   loss_drnn : {:5.5f}".format(step, loss_drnn[0])
 
            
 
@@ -410,30 +406,24 @@ class RosTF():
             u_buf = []
 
             while not self.coord.should_stop():
-                if self.stateSampled == True and self.emgSampled == True:
-                    self.stateSampled = False
+                if self.emgSampled == True:
                     self.emgSampled = False
 
-                    x_buf.append(self.stateData) 
                     u_buf.append(self.emgData)
 
-                    if len(x_buf) > self.seq_length+1 :
-                        x0 = np.array( x_buf[0] )
+                    if len(u_buf) > self.seq_length+1 :
+                        x0 = np.zeros( shape=[1,self.size_x] )
                         break
 
             while not self.coord.should_stop():
-                if self.stateSampled == True and self.emgSampled == True:
-                    self.stateSampled = False
+                if self.emgSampled == True:
                     self.emgSampled = False
 
                     # Buffering Data
-                    x_buf.append(self.stateData)
                     u_buf.append(self.emgData)
 
-                    x = np.array( x_buf[1:self.seq_length+1] )
                     u = np.array( u_buf[0:self.seq_length] )
 
-                    x_buf.pop(0)
                     u_buf.pop(0) 
 
                     # Get initial state , input
@@ -448,22 +438,74 @@ class RosTF():
                     zx_predict_ = self.sess.run(self.zx_next, feed_dict=feed_dict)
                     x_predict_ = self.rx.eval(session=self.sess,feed_dict={self.zx : zx_predict_})
                     x_predict = np.reshape( x_predict_, [self.seq_length, self.size_x] )
-                    err_x = np.sum(np.absolute(x_predict[-1,:]-x[-1,:]))
 
-                    x0 = x_predict[0,:]
+                    x0 = np.mean(x_predict,axis=0)
                      
                     if args.ros == 1 :
-                        pub_msg = Float32MultiArray(data=x_predict[-1,:])
+                        pub_msg = Float32MultiArray(data=x0)
                         self.pubPredict.publish(pub_msg)
                     
-                    print "State Err : {:.3f}".format(err_x) 
-                    
-                    fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x[-1,0],x[-1,1],x[-1,2],x[-1,3],x[-1,4],
-                                                                                               x_predict[-1,0],x_predict[-1,1],x_predict[-1,2],x_predict[-1,3],x_predict[-1,4]))
+                    print "{:.3f}   {:.3f}   {:.3f}   {:.3f}   {:.3f}".format(x_predict[-1,0],x_predict[-1,1],x_predict[-1,2],x_predict[-1,3],x_predict[-1,4])
 
-                time.sleep(0.001)
+                time.sleep(0.01)
 
             fRx.close()
+            
+            # while not self.coord.should_stop():
+            #     if self.stateSampled == True and self.emgSampled == True:
+            #         self.stateSampled = False
+            #         self.emgSampled = False
+
+            #         x_buf.append(self.stateData) 
+            #         u_buf.append(self.emgData)
+
+            #         if len(x_buf) > self.seq_length+1 :
+            #             x0 = np.array( x_buf[0] )
+            #             break
+
+            # while not self.coord.should_stop():
+            #     if self.stateSampled == True and self.emgSampled == True:
+            #         self.stateSampled = False
+            #         self.emgSampled = False
+
+            #         # Buffering Data
+            #         x_buf.append(self.stateData)
+            #         u_buf.append(self.emgData)
+
+            #         x = np.array( x_buf[1:self.seq_length+1] )
+            #         u = np.array( u_buf[0:self.seq_length] )
+
+            #         x_buf.pop(0)
+            #         u_buf.pop(0) 
+
+            #         # Get initial state , input
+            #         zu = self.zu.eval(session=self.sess, feed_dict={ self.u_ph : np.reshape(u,[1,self.seq_length,self.size_u])})
+            #         zx0 = self.zx.eval(session=self.sess, feed_dict={ self.x_ph : np.reshape(x0,[1,1,self.size_x])})
+                    
+            #         # Predict & print
+            #         feed_dict = { self.zu_ph : zu, 
+            #                       self.initial_state : np.reshape(zx0,[1,self.size_zx]),
+            #                       self.drnn_dropout : 1.0  } 
+
+            #         zx_predict_ = self.sess.run(self.zx_next, feed_dict=feed_dict)
+            #         x_predict_ = self.rx.eval(session=self.sess,feed_dict={self.zx : zx_predict_})
+            #         x_predict = np.reshape( x_predict_, [self.seq_length, self.size_x] )
+            #         err_x = np.sum(np.absolute(x_predict[-1,:]-x[-1,:]))
+
+            #         x0 = x_predict[0,:]
+                     
+            #         if args.ros == 1 :
+            #             pub_msg = Float32MultiArray(data=x_predict[-1,:])
+            #             self.pubPredict.publish(pub_msg)
+                    
+            #         print "State Err : {:.3f}".format(err_x) 
+                    
+            #         fRx.write("{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}\r\n".format(x[-1,0],x[-1,1],x[-1,2],x[-1,3],x[-1,4],
+            #                                                                                    x_predict[-1,0],x_predict[-1,1],x_predict[-1,2],x_predict[-1,3],x_predict[-1,4]))
+
+            #     time.sleep(0.001)
+
+            # fRx.close()
     def file_process_thread(self):
         print "file_process_thread : start"
 
