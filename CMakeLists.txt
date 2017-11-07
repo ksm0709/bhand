@@ -149,12 +149,12 @@ add_executable(gloveProcess src/gloveProcess.cpp)
 target_link_libraries(gloveProcess ${catkin_LIBRARIES})
 
 #test
-add_executable(resWatch src/bhand_test.cpp)
+#add_executable(resWatch src/bhand_test.cpp)
 
-add_dependencies(resWatch resWatch_generate_message_cpp)
-add_dependencies(resWatch ${catkin_EXPORTED_TARGETS})
+#add_dependencies(resWatch resWatch_generate_message_cpp)
+#add_dependencies(resWatch ${catkin_EXPORTED_TARGETS})
 
-target_link_libraries(resWatch ${catkin_LIBRARIES})
+#target_link_libraries(resWatch ${catkin_LIBRARIES})
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above

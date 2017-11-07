@@ -34,8 +34,15 @@ void showParam(void);
 
 int main(int argc, char **argv)
 {
-	FILE *datafp = fopen("emgdata.txt","w");
+	FILE *datafp = NULL;
+	char filename[100];
 	char mode = -1;
+
+	int posture, domain;
+	int posture_max, domain_max;
+
+	posture_max = 3;
+	domain_max = 2;
 
 	if( argc )
 	{
@@ -44,13 +51,26 @@ int main(int argc, char **argv)
 			case 'l': mode = MODE_MIN; break;
 			case 'h': mode = MODE_MAX; break;
 			case 'r': mode = MODE_RUN; break;
-			default: printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN \n\n");
+			case 'f': mode = MODE_RUN;
+
+					  if( argc < 4 )
+					  {
+						  printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN\n\t-f (filename) (domain) (class) : MODE_FILE_SAVE\n");
+						  return 0;
+					  }
+
+					  sprintf(filename,"~/Temp/%s.csv",argv[2]);  
+						
+					  datafp = fopen(filename, "w");
+					  domain = atoi( argv[3] );
+					  posture = atoi( argv[4] );
+					  
+					  break;
+
+			default: printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN\n\t-f (filename) (domain) (class) : MODE_FILE_SAVE\n");
 					 return 0;
 					 break;
 		}
-
-		if( argc > 2 )
-			channel = atoi(argv[2]);	
 	}
 
 
@@ -114,16 +134,44 @@ int main(int argc, char **argv)
 							tempAct = 0;
 
 						act[i] = muscle.get_next_activation( act[i] , tempAct, 0.004);
-						resData[i] = (float)(rmsFilter_update(i,act[i]));
+						//resData[i] = (float)(rmsFilter_update(i,act[i]));
+						resData[i] = act[i];
+					}
 
-						// For mav filter test
-//						mavData[i] = (int8_t)(rmsFilter_update(i,tempAct*100));
+					// File Output
+					if( datafp != NULL )
+					{
+						for(i=0;i<channel;i++)
+						{
+							fprintf(datafp,"%.6f,",resData[i]);
+						}
+
+						for(i=0;i<domain_max;i++)
+						{
+							if( i == domain )
+								fprintf(datafp,"1.0,");
+							else
+								fprintf(datafp,"0.0,");
+						}
+
+						for(i=0;i<posture_max;i++)
+						{
+							if( i == posture )
+								fprintf(datafp,"1.0");
+							else
+								fprintf(datafp,"0.0");
+
+							if( i < posture_max-1 )
+								fprintf(datafp,",");
+						}
+
+						fprintf(datafp,"\n");
 					}
 
 					msg.data.clear();
 					msg.data.assign( resData, resData + channel );
 					pub.publish( msg );					
-
+					
 					readFlag = false;
 				}
 
