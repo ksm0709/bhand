@@ -1,0 +1,125 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<root>
+ <tabbed_widget parent="main_window" name="Main Window">
+  <plotmatrix rows="2" tab_name="plot" columns="4">
+   <plot row="0" col="0">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="0" B="255" name="/actEMG/data.0"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="0">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="0" B="128" name="/actEMG/data.4"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="1">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="128" B="0" name="/actEMG/data.1"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="1">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="128" B="128" name="/actEMG/data.5"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="2">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="255" G="0" B="0" name="/actEMG/data.2"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="2">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="160" G="160" B="164" name="/actEMG/data.6"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="3">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="255" G="0" B="255" name="/actEMG/data.3"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="3">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="128" G="128" B="0" name="/actEMG/data.7"/>
+    <transform value="noTransform"/>
+   </plot>
+  </plotmatrix>
+  <currentPlotMatrix index="0"/>
+ </tabbed_widget>
+ <tabbed_widget parent="main_window" name="Main Window">
+  <plotmatrix rows="2" tab_name="plot" columns="4">
+   <plot row="0" col="0">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="0" B="255" name="/actEMG/data.0"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="0">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="0" B="128" name="/actEMG/data.4"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="1">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="128" B="0" name="/actEMG/data.1"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="1">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="0" G="128" B="128" name="/actEMG/data.5"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="2">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="255" G="0" B="0" name="/actEMG/data.2"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="2">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="160" G="160" B="164" name="/actEMG/data.6"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="0" col="3">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="255" G="0" B="255" name="/actEMG/data.3"/>
+    <transform value="noTransform"/>
+   </plot>
+   <plot row="1" col="3">
+    <range left="215.887716" top="1500.000000" right="220.883119" bottom="0.000000"/>
+    <limitY min="0" max="1500"/>
+    <curve R="128" G="128" B="0" name="/actEMG/data.7"/>
+    <transform value="noTransform"/>
+   </plot>
+  </plotmatrix>
+  <currentPlotMatrix index="0"/>
+ </tabbed_widget>
+ <use_relative_time_offset enabled="1"/>
+ <Plugins>
+  <DataLoad_CSV>
+   <default time_axis=""/>
+  </DataLoad_CSV>
+  <DataLoad_ROS_bags>
+   <selected_topics list=""/>
+  </DataLoad_ROS_bags>
+  <ROS_Topic_Streamer>
+   <selected_topics list="/actEMG"/>
+  </ROS_Topic_Streamer>
+  <RosoutPublisherROS/>
+  <TopicPublisherROS/>
+ </Plugins>
+ <previouslyLoadedStreamer name="ROS Topic Streamer"/>
+</root>
+

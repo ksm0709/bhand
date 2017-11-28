@@ -20,7 +20,7 @@ MuscleBase muscle;
 int channel;
 
 float resData[channel_MAX];
-float mavData[channel_MAX];
+float rmsData[channel_MAX];
 float act[channel_MAX];
 float rawData[channel_MAX];
 float max[channel_MAX];
@@ -59,12 +59,14 @@ int main(int argc, char **argv)
 						  return 0;
 					  }
 
-					  sprintf(filename,"~/Temp/%s.csv",argv[2]);  
-						
+					  sprintf(filename,"/home/taeho/Temp/%s.csv",argv[2]);  
+
 					  datafp = fopen(filename, "w");
 					  domain = atoi( argv[3] );
 					  posture = atoi( argv[4] );
 					  
+					  printf("Filename : %s(%d)\nDomain : %d\nClass :%d\n",filename,datafp,domain,posture);
+
 					  break;
 
 			default: printf("\n  Mode Error!\n\t-l : MODE_MIN\n\t-h : MODE_MAX \n\t-r : MODE_RUN\n\t-f (filename) (domain) (class) : MODE_FILE_SAVE\n");
@@ -134,8 +136,9 @@ int main(int argc, char **argv)
 							tempAct = 0;
 
 						act[i] = muscle.get_next_activation( act[i] , tempAct, 0.004);
-						//resData[i] = (float)(rmsFilter_update(i,act[i]));
-						resData[i] = act[i];
+						resData[i] = (float)(rmsFilter_update(i,act[i]));
+
+						//resData[i] = (float)(rmsFilter_update(i, rawData[i]));
 					}
 
 					// File Output
@@ -181,7 +184,7 @@ int main(int argc, char **argv)
 
 			}
 	
-		break;
+			break;
 
 		case MODE_MAX:
 
@@ -275,8 +278,11 @@ int main(int argc, char **argv)
 
 		break;
 	}
+	
+	if( fclose )
+		fclose(datafp);	
 
-	fclose(datafp);	
+
 	return 0;
 }
 
