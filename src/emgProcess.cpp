@@ -73,7 +73,6 @@ private:
 	int posture, domain;
 	int posture_max, domain_max;
 	int channel;
-	int save_count_max;
 
 	// Class, STL, FILE
 	MuscleBase muscle;
@@ -184,7 +183,7 @@ public:
 			printf("Input 'NAME' 'DOMAIN' : ");
 			scanf("%s %d",name,&domain);
 			
-			sprintf(filename,"/home/taeho/catkin_ws/src/bhand/src/tf_data/temp/%s_d%d.csv",name,domain);
+			sprintf(filename,"/home/taeho/catkin_ws/src/bhand/src/tf_data/thesis/%s_d%d.csv",name,domain);
 			
 			datafp = fopen(filename,"w");
 		}
@@ -249,56 +248,59 @@ public:
 			act[i] = muscle.get_next_activation( act[i] , tempAct, 0.004);
 			resData[i] = (float)(rmsFilter_update(i,act[i]));
 			
-			fir_energy[i].push( (float)(firFilter_update(i,rawData[i])) );
+			fir_energy[i].push( (float)(firFilter_update(i,tempAct)) );
 			burst_sum += fir_energy[i].get();
 		}
 		msg.data.clear();
 		msg.data.assign( resData, resData + channel );
 		pub_act.publish( msg );					
 
-		msg_burst.data = burst_sum;
+		msg_burst.data = burst_sum/channel;
 		pub_burst.publish( msg_burst );
 
-		// 7초마다 posture 변경
-		if( run_time > 8.0 )
+		if( save )
 		{
-			s_time = c_time = 0;
-			posture = (posture + 1)%posture_max;
-
-			msg_posture.data = (float)posture;
-			pub_posture.publish( msg_posture );
-		}
-		msg_time.data = 8.0-run_time;
-		pub_time.publish( msg_time );
-
-		if( run_time >= 3.0 && run_time < 7.0 && datafp != NULL)
-		{
-			// EMG 출력
-			for(i=0;i<channel;i++)
+			// 7초마다 posture 변경
+			if( run_time > 8.0 )
 			{
-				fprintf(datafp,"%.6f,",resData[i]);
-			}
-			// Domain 출력
-			for(i=0;i<domain_max;i++)
-			{
-				if( i == domain )
-					fprintf(datafp,"1.0,");
-				else
-					fprintf(datafp,"0.0,");
-			}
-			// Posture 출력
-			for(i=0;i<posture_max;i++)
-			{
-				if( i == posture )
-					fprintf(datafp,"1.0");
-				else
-					fprintf(datafp,"0.0");
+				s_time = c_time = 0;
+				posture = (posture + 1)%posture_max;
 
-				if( i < posture_max-1 )
-					fprintf(datafp,",");
+				msg_posture.data = (float)posture;
+				pub_posture.publish( msg_posture );
 			}
+			msg_time.data = 8.0-run_time;
+			pub_time.publish( msg_time );
 
-			fprintf(datafp,"\n");
+			if( run_time >= 3.0 && run_time < 7.0 && datafp != NULL)
+			{
+				// EMG 출력
+				for(i=0;i<channel;i++)
+				{
+					fprintf(datafp,"%.6f,",resData[i]);
+				}
+				// Domain 출력
+				for(i=0;i<domain_max;i++)
+				{
+					if( i == domain )
+						fprintf(datafp,"1.0,");
+					else
+						fprintf(datafp,"0.0,");
+				}
+				// Posture 출력
+				for(i=0;i<posture_max;i++)
+				{
+					if( i == posture )
+						fprintf(datafp,"1.0");
+					else
+						fprintf(datafp,"0.0");
+
+					if( i < posture_max-1 )
+						fprintf(datafp,",");
+				}
+
+				fprintf(datafp,"\n");
+			}
 		}
 	}
 
@@ -311,7 +313,6 @@ public:
 			ROS_INFO("mode : MODE_NORMALIZE");
 			
 			rmsFilter_init(64);
-			save_count_max = 0;
 
 			for(i=0;i<list.size();i++)
 			{
@@ -324,10 +325,13 @@ public:
 
 		if( run_time < sec )
 		{
-			msg_posture.data = 19;
-			pub_posture.publish( msg_posture );
-			msg_time.data = (float)sec-run_time;
-			pub_time.publish( msg_time );
+			if( save )
+			{
+				msg_posture.data = 19;
+				pub_posture.publish( msg_posture );
+				msg_time.data = (float)sec-run_time;
+				pub_time.publish( msg_time );
+			}
 
 			for(i=0;i<channel;i++)
 			{
@@ -359,10 +363,14 @@ public:
 			mode = MODE_RUN;
 			
 			s_time = c_time = 0;
-			posture = 0;
 
-			msg_posture.data = (float)posture;
-			pub_posture.publish( msg_posture );
+			if( save )
+			{
+				posture = 0;
+
+				msg_posture.data = (float)posture;
+				pub_posture.publish( msg_posture );
+			}
 		}
 	}
 
@@ -381,7 +389,6 @@ public:
 			readFlag = false;
 
 			c_time += (double)1/SamplingHz;
-
 			run_time = c_time-s_time;
 
 			switch( mode )
