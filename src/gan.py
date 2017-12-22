@@ -18,6 +18,7 @@ from sensor_msgs.msg import JointState
 
 from tensorflow.contrib.layers import fully_connected
 from tensorflow.contrib.layers import batch_norm
+from tensorflow.contrib.layers import l2_regularizer
 
 np.set_printoptions(threshold=np.inf)
 
@@ -37,6 +38,8 @@ class RosTF():
         self.use_z = False
         self.use_mse = False
         self.use_dz = True
+        self.buf=[]
+        self.buf_flag = False
 
         ###Network Vars(Hyper Parameters)
         self.n_z = 10
@@ -60,26 +63,45 @@ class RosTF():
         self.n_D_input = self.n_features
         self.n_D_output = 1 + self.n_class  
 
+        self.n_ref = 0
+        self.n_buf = 3
         self.n_batch = 250
         self.learning_rate = 0.005
         self.lamb_c = 1.0
         self.lamb_d = 2.0
         self.lamb_f = 2.0
-        self.sigma_dz = 0.25
+        self.sigma_dz = 0.2
                 
-        self.current_d = np.array( [0.,0.,0.,0.,0.5,0.5,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.] )
+        self.current_d = np.array( [0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.,0.] )
+
+        degree = input('Placement degree? ')
+        d0 = (degree*(16.0/360.0))%16.0
+        db = d0 - int(d0)
+        da = 1.0 - db
+        self.current_d[int(d0)] = da
+        self.current_d[int(d0)+1] = db 
+        self.current_d = np.correlate(self.current_d,[0.0,1.0,0.0],"same")
         self.current_d_batch = np.array( [self.current_d for _ in range(self.n_batch)])
+        print self.current_d
+
+        self.ref_target_X = []
+        self.ref_target_Y = []
 
         ###ROS Init
-        self.subEmg = rospy.Subscriber('/actEMG',
-                Float32MultiArray,
-                self.callbackEmg,
-                queue_size=1)
-        
-        self.pubPredict = rospy.Publisher('/srnn/Prediction',
-                Float32MultiArray,
-                queue_size=1)
+        if args.ros == True:
+            rospy.init_node('GAN')
+            self.subEmg = rospy.Subscriber('/actEMG',
+                    Float32MultiArray,
+                    self.callbackEmg,
+                    queue_size=1)
+            
+            self.pubPredict = rospy.Publisher('/posture',
+                    Int8,
+                    queue_size=1)
 
+            self.loop_rate = rospy.Rate(1000)
+
+            #self.get_ref()
             
         ###Tensorflow Init 
 
@@ -107,6 +129,7 @@ class RosTF():
                     self.dz = tf.placeholder(shape=[None,self.n_domain], dtype=tf.float32)
                     self.d_target = tf.placeholder(shape=[None, self.n_domain], dtype=tf.float32)
                     self.d_normal = tf.constant([[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0] for _ in range(self.n_batch)], dtype=tf.float32)
+                    self.keep_prob = tf.placeholder(tf.float32)
                     
                     with tf.variable_scope("Estimated"):
                         self.a_target = tf.placeholder(shape=[None, self.n_emg], dtype=tf.float32) 
@@ -122,6 +145,7 @@ class RosTF():
 
                     self.a_enque_ph = tf.placeholder(tf.float32, shape=[self.n_emg])
                     self.d_enque_ph = tf.placeholder(tf.float32, shape=[self.n_domain])
+                    self.y_enque_ph = tf.placeholder(tf.float32, shape=[self.n_class])
                     self.bn_phase = tf.placeholder(tf.bool)
 
                     
@@ -151,6 +175,7 @@ class RosTF():
                         # From target
                         G_target, G_target_dl = self.model_G( self.X_target, reuse=True, phase=self.phase, scope="Generator")
                         D_target_l, D_target_c, D_target_d, F_target = self.model_D(G_target,reuse=True, phase=self.phase, scope="Discriminator")
+                        
 
                         # From target_e : estimated d_target
                         Ge_target, Ge_target_dl = self.model_G( self.X_target_e, reuse=True, phase=self.phase, scope="Generator")
@@ -175,8 +200,19 @@ class RosTF():
                     d_var = self.get_var(all_vars, "Estimated")
                     G_var = self.get_var(all_vars, "Generator")
                     D_var = self.get_var(all_vars, "Discriminator") 
-                 
-                 
+
+                with tf.name_scope("gan_realtime"):
+                    G_realtime, G_realtime_dl = self.model_G( self.X_target, phase=self.phase, scope="Generator_r")
+                    D_realtime_l, D_realtime_c, D_target_d, F_target = self.model_D(G_realtime, phase=self.phase, scope="Discriminator_r")
+                    Dd_target_l, Dd_target_c, Dd_target_d, Fd_target = self.model_D(self.X_target, reuse=True, phase=self.phase, scope="Discriminator_r")
+
+                    # Get Network Vars
+                    all_vars= tf.global_variables()
+                    Gr_var = self.get_var(all_vars, "Generator_r")
+                    Dr_var = self.get_var(all_vars, "Discriminator_r") 
+
+                    self.update_network_params = [Gr_var[i].assign(G_var[i]) for i in range(len(Gr_var))] + [Dr_var[j].assign(D_var[j]) for j in range(len(Dr_var)) ]            
+
                 with tf.name_scope("ops"): 
                     # Loss & Train op
 
@@ -191,12 +227,12 @@ class RosTF():
 
                     else :
                         # Without Target
-                        #self.loss_D = tf.reduce_mean(-tf.log(D_normal_d)) + tf.reduce_mean(-tf.log(1-D_source_d)) + self.lamb*tf.reduce_mean( self.cross_entropy(self.Y_normal, D_normal_l) )
-                        #self.loss_G = tf.reduce_mean(-tf.log(D_source_d)) + self.lamb*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l)) + tf.reduce_mean(tf.square(F_normal-F_source)) + self.lamb*tf.reduce_mean(self.cross_entropy(self.d_normal, G_source_dl))
+                        # self.loss_D = tf.reduce_mean(-tf.log(D_normal_d)) + tf.reduce_mean(-tf.log(1-D_source_d)) + self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_normal, D_normal_l) ) + self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l) ) 
+                        # self.loss_G = tf.reduce_mean(-tf.log(D_source_d)) +  self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l)) + self.lamb_d*tf.reduce_mean(self.cross_entropy(self.d_normal, G_source_dl))
 
                         # With Target
                         self.loss_D = tf.reduce_mean(-tf.log(D_normal_d)) + tf.reduce_mean(-tf.log(1-D_target_d)) + tf.reduce_mean(-tf.log(1-D_source_d)) + self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_normal, D_normal_l) ) + self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l) ) 
-                        self.loss_G = tf.reduce_mean(-tf.log(D_target_d)) + tf.reduce_mean(-tf.log(D_source_d)) + self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l)) + self.lamb_f*tf.reduce_mean(tf.square(F_normal-F_target)) + self.lamb_f*tf.reduce_mean(tf.square(F_source-F_target)) + self.lamb_d*tf.reduce_mean(self.cross_entropy(self.d_normal, G_source_dl)) + self.lamb_d*tf.reduce_mean(self.cross_entropy(self.d_normal, G_target_dl)) 
+                        self.loss_G = tf.reduce_mean(-tf.log(D_target_d)) + tf.reduce_mean(-tf.log(D_source_d)) +  self.lamb_c*tf.reduce_mean( self.cross_entropy(self.Y_source, D_source_l)) + self.lamb_f*tf.reduce_mean(tf.square(F_normal-F_target)) + self.lamb_f*tf.reduce_mean(tf.square(F_source-F_target)) + self.lamb_d*tf.reduce_mean(self.cross_entropy(self.d_normal, G_source_dl)) + self.lamb_d*tf.reduce_mean(self.cross_entropy(self.d_normal, G_target_dl)) 
 
                     self.loss_d = tf.reduce_mean(-tf.log(De_target_d)) + tf.reduce_mean(-self.cross_entropy(De_target_c,De_target_c)) 
 
@@ -208,6 +244,8 @@ class RosTF():
                     self.acc_n = tf.reduce_mean( self.accuracy_measure(D_normal_c,self.Y_normal) )
                     self.acc_s = tf.reduce_mean( self.accuracy_measure(D_source_c,self.Y_source) )
                     self.acc_t = tf.reduce_mean( self.accuracy_measure(D_target_c,self.Y_target) )
+                    self.extract_posture = tf.reduce_sum(D_normal_c,axis=0) + 1
+                    self.data_transferred = G_realtime
 
                     #Init Variable
                     self.init = tf.global_variables_initializer()
@@ -216,13 +254,13 @@ class RosTF():
                     
                     #Queue & Coordinator
                     self.coord = tf.train.Coordinator()
-                    self.que = tf.FIFOQueue(shapes=[[self.n_features]],
-                                            dtypes=[tf.float32],
-                                            capacity=3000)
+                    self.que = tf.RandomShuffleQueue(shapes=[[self.n_features],[self.n_class]],
+                                            dtypes=[tf.float32,tf.float32],
+                                            capacity=10000, min_after_dequeue=5000, seed=2121)
 
 
                     self.queClose_op = self.que.close(cancel_pending_enqueues=True)
-                    self.enque_op = self.que.enqueue(tf.concat([self.a_enque_ph, self.d_enque_ph],0))
+                    self.enque_op = self.que.enqueue([ tf.concat([self.a_enque_ph, self.d_enque_ph],0), self.y_enque_ph ])
                     self.deque_op = self.que.dequeue_many(self.n_batch) 
                     self.que_size = self.que.size()
                     self.que_thread = tf.train.start_queue_runners(sess=self.sess, coord=self.coord)
@@ -241,8 +279,11 @@ class RosTF():
 
                     if args.load :
                         self.gan_saver.restore(self.sess,self.gan_model_dir)
+                    if args.save == SAVE_ALL :
+                        self.gan_saver.save(self.sess,self.gan_model_dir)
                     ############################################################### 
-                   
+ 
+                      
 
                     #Summary
                     self.lossD_sum = tf.summary.scalar("Discriminator Loss", self.loss_D)
@@ -263,6 +304,61 @@ class RosTF():
                     self.summary_writer = tf.summary.FileWriter(args.log_dir, self.sess.graph)
 
                 print "-------------------------------------------------"
+    def lrelu(x, alpha):
+        return tf.nn.relu(x) - alpha * tf.nn.relu(-x)
+
+    def get_ref(self):
+        
+        n_sample = 0
+        cnt = 0
+
+        print "pinch"
+        while cnt < 1250:
+           if self.emgSampled == True :
+               if cnt >= 500 and cnt < 1000:
+                   self.ref_target_X.append(self.emgData)  
+                   self.ref_target_Y.append([0.,1.,0.,0.,0.,0.,0.,0.,0.,0.])
+                   n_sample += 1
+                   print n_sample
+               self.emgSampled = False
+               cnt += 1
+
+        cnt = 0
+        print "fist"
+        while cnt < 1250:
+           if self.emgSampled == True :
+               if cnt >= 500 and cnt < 1000:
+                   self.ref_target_X.append(self.emgData)  
+                   self.ref_target_Y.append([0.,0.,1.,0.,0.,0.,0.,0.,0.,0.])
+                   n_sample += 1
+                   print n_sample
+               self.emgSampled = False
+               cnt += 1
+
+        cnt = 0
+        print "hook"
+        while cnt < 1250:
+           if self.emgSampled == True :
+               if cnt >= 500 and cnt < 1000:
+                   self.ref_target_X.append(self.emgData)  
+                   self.ref_target_Y.append([0.,0.,0.,1.,0.,0.,0.,0.,0.,0.])
+                   n_sample += 1
+                   print n_sample
+               self.emgSampled = False
+               cnt += 1
+        cnt = 0
+        print "pointing"
+        while cnt < 1250:
+           if self.emgSampled == True :
+               if cnt >= 500 and cnt < 1000:
+                   self.ref_target_X.append(self.emgData)  
+                   self.ref_target_Y.append([0.,0.,0.,0.,1.,0.,0.,0.,0.,0.])
+                   n_sample += 1
+                   print n_sample
+               self.emgSampled = False
+               cnt += 1
+
+        self.n_ref = n_sample
     
     def input_pipline(self,list_filename, data_size, batch_size, is_target=False):
         #File input pipeline
@@ -273,7 +369,7 @@ class RosTF():
 
         csv_data = tf.decode_csv(value, record_defaults=[[1.] for _ in range(data_size)])
 
-        get_data = tf.train.shuffle_batch([csv_data],capacity=10000,min_after_dequeue=8000,batch_size=batch_size, num_threads=3)
+        get_data = tf.train.shuffle_batch([csv_data],capacity=1000,min_after_dequeue=800,batch_size=batch_size, num_threads=3)
         
         Xa,Xd,Y = tf.split(get_data, [self.n_emg,self.n_domain,self.n_class],1)
 
@@ -282,12 +378,9 @@ class RosTF():
 
         if self.use_dz == True:
 
-            # c_in = tf.reshape(Xd, [self.n_batch,self.n_domain,1])
+            c_in = tf.reshape(Xd, [self.n_batch,self.n_domain,1])
             
-            # Xd = tf.nn.convolution( c_in, filter=self.smoothing_filter, padding='SAME' )
-            # Xd = tf.reshape( Xd, shape=[self.n_batch,self.n_domain] ) 
-            # Xd = self.normalize( Xd )
-
+            
             Xd = Xd + self.dz       
 
         X = tf.concat([Xa,Xd],1)
@@ -310,13 +403,13 @@ class RosTF():
         
         G_h = tensor_in
         for i in range(1,n_layer_h+1):
-            G_h =  self.layer(G_h, self.n_G_input + i*2, activation_fn=tf.nn.relu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(h_cnt))
+            G_h =  self.layer(G_h, self.n_G_input + i*2, activation_fn=tf.nn.elu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(h_cnt))
             h_cnt += 1
         for i in range(n_layer_h,0,-1):
-            G_h =  self.layer(G_h, self.n_G_input + i*2-1 , activation_fn=tf.nn.relu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(h_cnt))
+            G_h =  self.layer(G_h, self.n_G_input + i*2-1 , activation_fn=tf.nn.elu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(h_cnt))
             h_cnt += 1
 
-        G_l = self.layer(G_h, self.n_G_output, activation_fn=None, use_bn=False,phase=phase, reuse=reuse, scope=scope+"/o")
+        G_l = tf.nn.dropout(self.layer(G_h, self.n_G_output, activation_fn=None, use_bn=False,phase=phase, reuse=reuse, scope=scope+"/o"), keep_prob=0.5)
         
         Ga_l, Gd_l = tf.split( G_l, [self.n_emg, self.n_domain], 1)
 
@@ -334,9 +427,9 @@ class RosTF():
         D_h = tensor_in
         Fbuf = []
         for i in range(1,n_layer+1):
-            D_h =  self.layer(D_h, self.n_D_input - n_neuron*i, activation_fn=tf.nn.relu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(i))
+            D_h =  self.layer(D_h, self.n_D_input - n_neuron*i, activation_fn=tf.nn.elu, use_bn=True,phase=phase, reuse=reuse, scope=scope+"/h"+str(i))
             Fbuf.append( D_h )
-        D_l = self.layer(D_h, self.n_D_output, activation_fn=None, use_bn=False,phase=phase, reuse=reuse, scope=scope+"/o")
+        D_l = tf.nn.dropout( self.layer(D_h, self.n_D_output, activation_fn=None, use_bn=False,phase=phase, reuse=reuse, scope=scope+"/o"), keep_prob=self.keep_prob )
 
         Dc_l, Dd_l = tf.split( D_l , [self.n_class,1], 1)
         
@@ -395,21 +488,51 @@ class RosTF():
         self.emgData = msg.data
         self.emgSampled = True
 
+    def get_dz(self,dz):
+        if dz > 0 :
+            return np.random.normal(0, dz, size=(self.n_batch, self.n_domain)).astype(np.float32)
+        else :
+            return np.zeros((self.n_batch, self.n_domain)).astype(np.float32)
+
+
     def enque_thread(self):
         print "enque_thread : start"
 
+        self.buf=[]
         with self.coord.stop_on_exception():
             while not self.coord.should_stop():
                 if self.emgSampled == True :
 
                     a = np.array( self.emgData )
-
+                    
                     self.sess.run(self.enque_op, feed_dict={ self.a_enque_ph : a,
-                                                             self.d_enque_ph : self.current_d} )
+                                                             self.d_enque_ph : self.current_d,
+                                                             self.y_enque_ph : np.zeros([self.n_class])} )
+                    self.buf.append(np.concatenate([a,self.current_d]))
 
+                    if len(self.buf) > self.n_buf:
+                        self.buf.pop(0)
+
+                    if self.n_ref > 0:
+                        for i in range(9): 
+                            ref_idx = np.random.choice(self.n_ref,1)[0]
+
+                            self.sess.run(self.enque_op, feed_dict={ self.a_enque_ph : self.ref_target_X[ref_idx],
+                                                                    self.d_enque_ph : self.current_d,
+                                                                    self.y_enque_ph : self.ref_target_Y[ref_idx]} )
+
+                    
+                    self.buf_flag = True
                     self.emgSampled = False
 
                 time.sleep(0.001)
+        
+    def get_dz(self, sigma):
+        if sigma > 0:
+            return np.random.normal(0, sigma, size=(self.n_batch, self.n_domain)).astype(np.float32)
+        else :
+            return np.zeros(shape=(self.n_batch, self.n_domain), dtype=np.float32)
+
 
     def train_thread(self):
         print "train_thread : start"
@@ -419,42 +542,45 @@ class RosTF():
             acc_sum = 0.
             lossD_sum = 0.
             lossG_sum = 0.
-            epoch_max = 3
+            epoch_max = 5
             epoch = 0
             step_max = 10000
-            step_max_global = epoch_max*step_max
+            step_max_global = (epoch_max-1)*step_max
             step = 0
             while not self.coord.should_stop():
 
                 step_global = epoch*step_max+step
-                dz_step = (step_max_global-step_global+1)*self.sigma_dz/step_max_global
+                dz_step = (step_max_global-step_global)*self.sigma_dz/step_max_global
 
                 if args.ros == True:
+                    self.loop_rate.sleep()
+
                     size = self.sess.run(self.que_size)
 
-                    if size < self.n_batch :
+                    if size < self.n_batch*10 :
                         continue
                     # Sample Target domain from queue
-                    Xt = self.sess.run(self.deque_op)
-                    Yt = np.zeros([self.n_batch,self.n_class])
+                    Xt, Yt = self.sess.run(self.deque_op)
                 else :
-                    dz = np.random.normal(0, dz_step, size=(self.n_batch, self.n_domain)).astype(np.float32)
+                    time.sleep(0.001)
+
+                    dz = self.get_dz(dz_step) 
                     [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={self.d_target : self.current_d_batch , self.dz : dz} )
 
                     #print Xt
 
                 # Sample Normal domain
-                dz = np.zeros(shape=(self.n_batch, self.n_domain), dtype=np.float32)
+                dz = self.get_dz(0)
                 [Xn, Yn] = self.sess.run( self.sample_batch_normal, feed_dict={self.dz : dz} )
                 # Sample Source domain
-                dz = np.random.normal(0, dz_step, size=(self.n_batch, self.n_domain)).astype(np.float32)
+                dz = self.get_dz(dz_step) 
                 [Xs, Ys] = self.sess.run( self.sample_batch_source, feed_dict={self.dz : dz} )
 
                 
                 feed_dict = { self.X_normal : Xn, self.Y_normal : Yn, 
                               self.X_source : Xs, self.Y_source : Ys , 
                               self.X_target : Xt ,self.Y_target : Yt ,
-                              self.phase : True}
+                              self.phase : True, self.keep_prob : 0.8}
                  
                 if self.use_z == True :
                     z_val = np.random.normal(0, 1, size=(self.n_batch, self.n_z)).astype(np.float32)
@@ -471,11 +597,14 @@ class RosTF():
                 acc_sum = acc_sum + float(acc_n)     
                 
 
-                if (step+1)%10 == 0 :
-                    print "epoch : {:d}    step : {:d}    lossD : {:f}    lossG : {:f}   accuracy : {:.2f}".format(epoch,step+1,lossD_sum/10,lossG_sum/10,acc_sum*10)
+                if (step+1)%100 == 0 :
+                    print "epoch : {:d}    step : {:d}    lossD : {:f}    lossG : {:f}   accuracy : {:.2f}".format(epoch,step+1,lossD_sum/100,lossG_sum/100,acc_sum)
                     acc_sum = 0.
                     lossD_sum = 0.
                     lossG_sum = 0.
+
+                    
+                    self.sess.run(self.update_network_params)
 
                     summary_str = self.sess.run( self.summary_train, feed_dict = feed_dict )
                     self.summary_writer.add_summary( summary_str, step_max*epoch + step )
@@ -486,79 +615,80 @@ class RosTF():
                         if args.save == SAVE_ALL :
                             self.gan_saver.save(self.sess,self.gan_model_dir)
 
-                            
-
                 step = step+1
                 
                 if step >= step_max :
                     step = 0
                     epoch = epoch+1
 
-                    if epoch > epoch_max :
+                    if epoch >= epoch_max :
                         break
-
-                time.sleep(0.001)
-           
-            print "Training Done!\n"
-
-
-            # Save result for t-sne
-            savedir = "/home/taeho/catkin_ws/src/bhand/src/tf_data/embedding"
-            f_normal = open(savedir+'/normal.tsv','w')
-            f_source = open(savedir+'/source.tsv','w')
-            f_source_t = open(savedir+'/source_t.tsv','w')
-            f_target = open(savedir+'/target.tsv','w')
-
-            f_normal.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
-            f_source.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
-            f_source_t.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
-            f_target.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
-            idx = 1
-            posture_dict={1 : 'rest', 2 : 'pinch', 3 : 'fist' , 4 : 'hook', 5 : 'pointing', 6 : 'one' , 7 : 'two', 8 : 'three', 9 : 'four' , 10 : 'five'}
-
-            for i in range(40):
-                dz = np.random.normal(0, self.sigma_dz, size=(self.n_batch, self.n_domain)).astype(np.float32)
-                [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={self.d_target : self.current_d_batch , self.dz : dz} )
-                dz = np.zeros(shape=(self.n_batch, self.n_domain), dtype=np.float32)
-                [Xn, Yn] = self.sess.run( self.sample_batch_normal, feed_dict={self.dz : dz} )
-                dz = np.random.normal(0, self.sigma_dz, size=(self.n_batch, self.n_domain)).astype(np.float32)
-                [Xs, Ys] = self.sess.run( self.sample_batch_source, feed_dict={self.dz : dz} )
                 
-                Ndecode = self.sess.run(self.decode_normal, feed_dict=feed_dict)        
-                Sdecode = self.sess.run(self.decode_source, feed_dict=feed_dict)        
-                Gdecode = self.sess.run(self.decode_source_t, feed_dict=feed_dict)        
-                Tdecode = self.sess.run(self.decode_target, feed_dict=feed_dict)        
+            # print "Training Done!\n"
 
-                for j in range( self.n_batch ):
-                    f_normal.write("{:d}\t{:d} : ".format(idx,int(Ndecode[j,0])-1) + posture_dict[int(Ndecode[j,0])] + "\t")
-                    f_source.write("{:d}\t{:d} : ".format(idx,int(Sdecode[j,0])-1) + posture_dict[int(Sdecode[j,0])] + "\t")
-                    f_source_t.write("{:d}\t{:d} : ".format(idx,int(Gdecode[j,0])-1) + posture_dict[int(Gdecode[j,0])] + "\t")
-                    f_target.write("{:d}\t{:d} : ".format(idx,int(Tdecode[j,0])-1) + posture_dict[int(Tdecode[j,0])] + "\t")
-                    # f_normal.write("{:d}\t{:d}\t".format(idx, int(Ndecode[j,0])))
-                    # f_source.write("{:d}\t{:d}\t".format(idx, int(Sdecode[j,0])))
-                    # f_source_t.write("{:d}\t{:d}\t".format(idx, int(Gdecode[j,0])))
-                    # f_target.write("{:d}\t{:d}\t".format(idx, int(Tdecode[j,0])))
+            # if args.ros != True:
+            #     # Save result for t-sne
+            #     savedir = "/home/taeho/catkin_ws/src/bhand/src/tf_data/embedding"
+            #     f_normal = open(savedir+'/normal.tsv','w')
+            #     f_source = open(savedir+'/source.tsv','w')
+            #     f_source_t = open(savedir+'/source_t.tsv','w')
+            #     f_target = open(savedir+'/target.tsv','w')
 
-                    idx += 1
+            #     f_normal.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
+            #     f_source.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
+            #     f_source_t.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
+            #     f_target.write("name\tlabel\tA0\tA1\tA2\tA3\tA4\tA5\tA6\tA7\tPlacement\n")
+            #     idx = 1
+            #     posture_dict={1 : 'rest', 2 : 'pinch', 3 : 'fist' , 4 : 'hook', 5 : 'pointing', 6 : 'one' , 7 : 'two', 8 : 'three', 9 : 'four' , 10 : 'five'}
 
-                    for data in Ndecode[j,1:9]:
-                        f_normal.write("{:f}\t".format(data))
-                    for data in Sdecode[j,1:9]:
-                        f_source.write("{:f}\t".format(data))
-                    for data in Gdecode[j,1:9]:
-                        f_source_t.write("{:f}\t".format(data)) 
-                    for data in Tdecode[j,1:9]:
-                        f_target.write("{:f}\t".format(data)) 
+            #     for i in range(40):
+            #         dz = np.random.normal(0, self.sigma_dz, size=(self.n_batch, self.n_domain)).astype(np.float32)
+            #         [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={self.d_target : self.current_d_batch , self.dz : dz} )
+            #         dz = np.zeros(shape=(self.n_batch, self.n_domain), dtype=np.float32)
+            #         [Xn, Yn] = self.sess.run( self.sample_batch_normal, feed_dict={self.dz : dz} )
+            #         dz = np.random.normal(0, self.sigma_dz, size=(self.n_batch, self.n_domain)).astype(np.float32)
+            #         [Xs, Ys] = self.sess.run( self.sample_batch_source, feed_dict={self.dz : dz} )
 
-                    f_normal.write("{:f}\n".format(Ndecode[j,9]))
-                    f_source.write("{:f}\n".format(Sdecode[j,9]))
-                    f_source_t.write("{:f}\n".format(Gdecode[j,9]))
-                    f_target.write("{:f}\n".format(Tdecode[j,9]))
+            #         feed_dict = { self.X_normal : Xn, self.Y_normal : Yn, 
+            #                     self.X_source : Xs, self.Y_source : Ys , 
+            #                     self.X_target : Xt ,self.Y_target : Yt ,
+            #                     self.phase : True}
 
-            f_normal.close()
-            f_source.close()
-            f_source_t.close()
-            f_target.close()
+            #         Ndecode = self.sess.run(self.decode_normal, feed_dict=feed_dict)        
+            #         Sdecode = self.sess.run(self.decode_source, feed_dict=feed_dict)        
+            #         Gdecode = self.sess.run(self.decode_source_t, feed_dict=feed_dict)        
+            #         Tdecode = self.sess.run(self.decode_target, feed_dict=feed_dict)        
+
+            #         for j in range( self.n_batch ):
+            #             f_normal.write("{:d}\t{:d} : ".format(idx,int(Ndecode[j,0])-1) + posture_dict[int(Ndecode[j,0])] + "\t")
+            #             f_source.write("{:d}\t{:d} : ".format(idx,int(Sdecode[j,0])-1) + posture_dict[int(Sdecode[j,0])] + "\t")
+            #             f_source_t.write("{:d}\t{:d} : ".format(idx,int(Gdecode[j,0])-1) + posture_dict[int(Gdecode[j,0])] + "\t")
+            #             f_target.write("{:d}\t{:d} : ".format(idx,int(Tdecode[j,0])-1) + posture_dict[int(Tdecode[j,0])] + "\t")
+            #             # f_normal.write("{:d}\t{:d}\t".format(idx, int(Ndecode[j,0])))
+            #             # f_source.write("{:d}\t{:d}\t".format(idx, int(Sdecode[j,0])))
+            #             # f_source_t.write("{:d}\t{:d}\t".format(idx, int(Gdecode[j,0])))
+            #             # f_target.write("{:d}\t{:d}\t".format(idx, int(Tdecode[j,0])))
+
+            #             idx += 1
+
+            #             for data in Ndecode[j,1:9]:
+            #                 f_normal.write("{:f}\t".format(data))
+            #             for data in Sdecode[j,1:9]:
+            #                 f_source.write("{:f}\t".format(data))
+            #             for data in Gdecode[j,1:9]:
+            #                 f_source_t.write("{:f}\t".format(data)) 
+            #             for data in Tdecode[j,1:9]:
+            #                 f_target.write("{:f}\t".format(data)) 
+
+            #             f_normal.write("{:f}\n".format(Ndecode[j,9]))
+            #             f_source.write("{:f}\n".format(Sdecode[j,9]))
+            #             f_source_t.write("{:f}\n".format(Gdecode[j,9]))
+            #             f_target.write("{:f}\n".format(Tdecode[j,9]))
+
+            #     f_normal.close()
+            #     f_source.close()
+            #     f_source_t.close()
+            #     f_target.close()
 
             self.train_done = True
                     
@@ -567,41 +697,54 @@ class RosTF():
         print "prediction_thread : start"
 
         with self.coord.stop_on_exception():
-
+            f = open('result.csv','w')
+            self.sess.run(self.update_network_params) 
             step = 0
             while not self.coord.should_stop():
                 if args.ros == True:
-                    size = self.sess.run(self.que_size)
+                    self.loop_rate.sleep()
 
-                    if size < self.n_batch :
+                    if len(self.buf) < self.n_buf or self.buf_flag == False :
                         continue
-                    # Sample Target domain from queue
-                    Xt = self.sess.run(self.deque_op)
-                    Yt = np.zeros([self.n_batch,self.n_class])
-                else :
-                    [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={ self.d_target : self.current_d_batch} )
+                    
+                    self.buf_flag = False
 
-                feed_dict = { self.X_target : Xt }
+                    Xt = np.array(self.buf)
+                    Yt = np.zeros([self.n_buf,self.n_class])
+                else :
+                    time.sleep(0.001)
+                    # dz_step = 0.001
+                    # dz = np.random.normal(0, dz_step, size=(self.n_batch, self.n_domain)).astype(np.float32)
+                    dz = self.get_dz(0.0)
+                    [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={ self.d_target : self.current_d_batch, self.dz : dz} )
 
                 if self.use_z == True :
-                    z_val = np.random.normal(0, 1, size=(self.n_batch, self.n_z)).astype(np.float32)
+                    z_val = np.random.normal(0, 1, size=(self.n_buf, self.n_z)).astype(np.float32)
                     feed_dict[self.z_prior] = z_val
 
-                G, Dd, Dc = self.sess.run([self.G_target,self.D_target_d,self.D_target_c], feed_dict={self.X_target:Xt})
+                Dc, G = self.sess.run([self.extract_posture, self.data_transferred], feed_dict={self.X_target:Xt, self.phase : False, self.keep_prob : 1.0})
+                posture = Dc
 
                 if (step+1)%10 == 0 :
-                    print "a_normal : {}    class : {}    Dd : {}".format(G,Dc,Dd)
+                    print "class : {}".format(posture)
+
+                    for idx in range(self.n_buf):
+                        f.write("{},{},{}\n".format(Xt[idx],G[idx],posture))
+
+                    if args.ros == True:
+                        self.pubPredict.publish(posture)
                 
                 step = step+1
-                time.sleep(0.001)
+            f.close()
 
     def estimate_d(self):
-        step_max = int(args.estimate*250 / self.n_batch)
+        step_max = 1000 #int(args.estimate*250 / self.n_batch)
         step = 0
 
         while step < step_max :
 
             if args.ros == True :
+                self.loop_rate.sleep()
                 size = self.sess.run(self.que_size)
 
                 if size < self.n_batch :
@@ -610,9 +753,10 @@ class RosTF():
                 Xt = self.sess.run(self.deque_op)
                 Yt = np.zeros([self.n_batch,self.n_class])
             else :
+                time.sleep(0.001)
                 [Xt,Yt] = self.sess.run( self.sample_batch_target, feed_dict={ self.d_target : self.current_d_batch })
 
-            feed_dict={self.a_target : Xt[:,:self.n_emg]}
+            feed_dict={self.a_target : Xt[:,:self.n_emg], self.keep_prob : 1.0, self.phase : False}
 
             if self.use_z == True :
                 z_val = np.random.normal(0, 1, size=(self.n_batch, self.n_z)).astype(np.float32)
@@ -625,6 +769,8 @@ class RosTF():
                 print estimated_d
             
             step = step+1
+
+        print "Estimated : {}".format(estimated_d)
 
         self.current_d = estimated_d
         self.current_d_batch = [ estimated_d for _ in range(self.n_batch) ]
@@ -645,15 +791,15 @@ class RosTF():
         # Using ROS : get data from ros messages 
         if args.ros == True :
             #Start ros
-            rospy.init_node('GAN')
-            rate = rospy.Rate(500)
+            
+            rate = rospy.Rate(1000)
         
-            #Start threads
+            threads[0].start() #Enque thread
+            if args.mode == MODE_TRAINING:
+                threads[1].start() #Train thread
+            
             if args.mode == MODE_PREDICTION:
                 threads[2].start() #Predict thread
-            else : 
-                threads[0].start() #Enque thread
-                threads[1].start() #Train thread
 
             #Run
             with self.coord.stop_on_exception():
@@ -662,11 +808,11 @@ class RosTF():
         
         else : # non-ROS : get data from files
 
-            #Start threads
+            if args.mode == MODE_TRAINING:
+                threads[1].start() #Train thread
+
             if args.mode == MODE_PREDICTION:
                 threads[2].start() #Predict thread
-            else :
-                threads[1].start() #Train thread
 
             #Run
             with self.coord.stop_on_exception():

@@ -3,6 +3,7 @@
 #include "std_msgs/MultiArrayLayout.h"
 #include "std_msgs/MultiArrayDimension.h"
 #include "bhand/EmgArray.h"
+#include "std_msgs/Int16MultiArray.h"
 #include "std_msgs/Float32MultiArray.h"
 #include "std_msgs/Float32.h"
 #include <stdlib.h>
@@ -409,7 +410,7 @@ int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "emgProcess");
 	ros::NodeHandle nh;
-		
+	
 	int channel = 8; 
 	bool normalize = false, save = false;
 

@@ -138,15 +138,18 @@ add_library(bhand
 
 #emgProcess 
 add_executable(emgProcess src/emgProcess.cpp)
-
 target_link_libraries(emgProcess ${catkin_LIBRARIES} bhand) 
-
 add_dependencies(emgProcess ${catkin_EXPORTED_TARGETS})
 
 #gloveProcess
 add_executable(gloveProcess src/gloveProcess.cpp)
-
 target_link_libraries(gloveProcess ${catkin_LIBRARIES})
+add_dependencies(gloveProcess ${catkin_EXPORTED_TARGETS})
+
+#handControl
+add_executable(robolimbControl src/robolimb_control.cpp)
+target_link_libraries(robolimbControl ${catkin_LIBRARIES})
+add_dependencies(robolimbControl ${catkin_EXPORTED_TARGETS})
 
 #test
 #add_executable(resWatch src/bhand_test.cpp)
