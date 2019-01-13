@@ -70,7 +70,7 @@ int main(int argc, char **argv)
 	int i,save_count=0;
 
 	firFilter_init(16);
-	rmsFilter_init(32);
+	rmsFilter_init(300);
 
 	//system("rosparam load ~/catkin_ws/src/bhand/config/emgConfig.yaml");
 	
