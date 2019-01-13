@@ -1,0 +1,21 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "",
+        "limitSymbolsToIncludedHeaders": true
+      },
+      "includePath": [
+        "/home/hong/catkin_ws/devel/include",
+        "/opt/ros/kinetic/include",
+        "/home/hong/catkin_ws/src/bhand/include",
+        "/home/hong/catkin_ws/src/dyros_practice_1/include",
+        "/home/hong/catkin_ws/src/dyros_practice_3/include",
+        "/home/hong/catkin_ws/src/pendulum_test/include",
+        "/home/hong/catkin_ws/src/vrep_franka_tutorial/include",
+        "/usr/include"
+      ],
+      "name": "Linux"
+    }
+  ]
+}

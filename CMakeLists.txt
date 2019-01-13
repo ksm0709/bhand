@@ -17,7 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
 ## See http://ros.org/doc/api/catkin/html/user_guide/setup_dot_py.html
-# catkin_python_setup()
+catkin_python_setup()
 
 ################################################
 ## Declare ROS messages, services and actions ##
@@ -141,15 +141,12 @@ add_executable(emgProcess src/emgProcess.cpp)
 target_link_libraries(emgProcess ${catkin_LIBRARIES} bhand) 
 add_dependencies(emgProcess ${catkin_EXPORTED_TARGETS})
 
-#gloveProcess
-add_executable(gloveProcess src/gloveProcess.cpp)
-target_link_libraries(gloveProcess ${catkin_LIBRARIES})
-add_dependencies(gloveProcess ${catkin_EXPORTED_TARGETS})
+#emgNode
+add_executable(emg_server_node src/emg_server_node.cpp)
+target_link_libraries(emg_server_node
+  ${catkin_LIBRARIES}
+)
 
-#handControl
-add_executable(robolimbControl src/robolimb_control.cpp)
-target_link_libraries(robolimbControl ${catkin_LIBRARIES})
-add_dependencies(robolimbControl ${catkin_EXPORTED_TARGETS})
 
 #test
 #add_executable(resWatch src/bhand_test.cpp)
@@ -176,10 +173,10 @@ add_dependencies(robolimbControl ${catkin_EXPORTED_TARGETS})
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# install(PROGRAMS
-#   scripts/my_python_script
-#   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
+ install(PROGRAMS
+   src/ann.py
+   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+ )
 
 ## Mark executables and/or libraries for installation
 # install(TARGETS bHand bHand_node

@@ -1,0 +1,13 @@
+<launch>
+    <arg name="training"    default="false"/>
+    <arg if="$(arg training)" name="args"    default="-t" />
+    <arg unless="$(arg training)" name="args"    default="-l" />
+
+    <node pkg="bhand" type="emg_server_node" name="emg_node">
+		<param name="port_number" value="9999"/>		
+	</node>
+    <node pkg="bhand" type="emgProcess" name="emgProcess" output="screen" args="-r">
+        <param name="channel" value="16"/>
+    </node>
+    <node pkg="bhand" type="ann.py" name="ann_node" output="screen" args="$(arg args)"/>
+</launch>

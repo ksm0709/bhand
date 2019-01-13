@@ -1,6 +1,0 @@
-<launch>
-	<node pkg="emg4board" type="emg4node" name="emgSampler" output="screen" args="/dev/ttyUSB0"/>
-	<node pkg="bhand" type="emgProcess" name="emgProcess" output="screen" args="-r"/>
-	
-	<node pkg="bhand" type="armControl" name="armControl" output="screen"/>
-</launch>
