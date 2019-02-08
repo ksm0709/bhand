@@ -1,4 +1,5 @@
 #include<stdlib.h>
+#include<math.h>
 /*
 
 FIR filter designed with
@@ -124,11 +125,11 @@ float rms_update( rms_filter* f, float data )
 		
 	res = 0;
 	for( i = f->top; i >= 0 ; i-- )
-		res += (float)f->data[i];
+		res += f->data[i] * f->data[i];
 	for( i = f->order-1; i > f->top ; i-- )
-		res += (float)f->data[i];
+		res += f->data[i] * f->data[i];
 	
-	res = res / f->order;
+	res = sqrt(res) / f->order;
 
 	return res; 		
 }
